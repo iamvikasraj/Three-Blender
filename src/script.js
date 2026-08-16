@@ -79,9 +79,9 @@ const CONFIG = {
         fov: 40,
         autoFrame: true,       // position the camera to frame the loaded model
         heroAngle: true,       // low, dramatic 3/4-front angle like the game menu
-        heroAzimuth: 135,      // degrees around the car (tune to face the front)
-        heroElevation: 10,     // degrees above the ground (low = dramatic)
-        heroDistance: 1.35,    // multiplier on the auto-fit distance (smaller = tighter)
+        heroAzimuth: 48,       // degrees around the car (close rear-3/4, wheel in foreground)
+        heroElevation: 5,      // degrees above the ground (low = dramatic)
+        heroDistance: 0.95,    // multiplier on the auto-fit distance (smaller = tighter)
     },
     // Test track ─ hide the city and drive on a simple flat course to tune the
     // driving feel. Set enabled:false to go back to the Rockport map.
@@ -99,9 +99,10 @@ const CONFIG = {
         friction: 4,        // coast-down when off the throttle
         steer: 1.9,         // turn rate (radians/sec at speed)
         groundFollow: true, // raycast down onto the map so it follows hills
-        headingOffset: 0,   // degrees, to align the model's nose with travel
-        camDistance: 5.5,   // chase camera distance behind the car
-        camHeight: 2.2,
+        headingOffset: 0,   // degrees, auto-set at load to align the nose with travel
+        camDistance: 6.5,   // chase camera distance from the car (world units)
+        camElevation: 9,    // chase camera height angle (deg) — low & cinematic
+        camAzimuth: 48,     // rear-3/4 offset (matches the hero menu angle)
     },
     // "Most Wanted" cinematic look ─ toggle any of these live in the GUI
     cinematic: {
@@ -165,6 +166,8 @@ let mixer = null
 const actions = {}
 const carHome = { position: new THREE.Vector3(), rotationY: 0 } // spawn transform for drive mode
 let carGroundOffset = 0 // distance from the car's pivot down to its wheels (so it rests ON roads)
+const wheels = []       // wheel nodes, spun while driving
+let wheelRadius = 0.34  // world units, derived from the model
 
 function clearCurrentModel() {
     if (!currentModel) return
@@ -265,7 +268,44 @@ function loadModel(path) {
             // ground-follow rests the wheels on the road, not the pivot.
             const cbox = new THREE.Box3().setFromObject(currentModel)
             carGroundOffset = currentModel.position.y - cbox.min.y
-            window.__car = currentModel // debug handle
+
+            // Collect the wheel parent nodes so we can spin them while driving.
+            // GLTFLoader sanitizes names, so they arrive as wheel / wheel001 / ...
+            wheels.length = 0
+            currentModel.traverse((o) => {
+                if (/^wheel\d*$/.test(o.name)) wheels.push(o)
+            })
+            if (wheels.length) {
+                currentModel.updateWorldMatrix(true, true)
+                const wb = new THREE.Box3().setFromObject(wheels[0]).getSize(new THREE.Vector3())
+                wheelRadius = Math.max(wb.x, wb.y, wb.z) / 2 || wheelRadius
+
+                // Find the car's TRUE forward axis from its body parts (this model
+                // came through FBX→glTF, so the nose is not a guessable axis).
+                const localCenter = (name) => {
+                    const o = currentModel.getObjectByName(name)
+                    if (!o) return null
+                    const b = new THREE.Box3().setFromObject(o)
+                    return b.isEmpty() ? null : currentModel.worldToLocal(b.getCenter(new THREE.Vector3()))
+                }
+                const frontRef = localCenter('bump_front_ok') || localCenter('bonnet_ok') || localCenter('peredfar')
+                const rearRef = localCenter('bump_rear_ok') || localCenter('boot_ok')
+                let fwd = null
+                if (frontRef && rearRef) {
+                    fwd = frontRef.clone().sub(rearRef)
+                    fwd.y = 0
+                    fwd.normalize()
+                    // Make the car drive nose-first: rotate its forward onto +Z
+                    CONFIG.drive.headingOffset = -THREE.MathUtils.radToDeg(Math.atan2(fwd.x, fwd.z))
+                }
+
+                // Capture base orientation + classify front/rear by the real forward axis
+                wheels.forEach((w) => {
+                    w.userData.base = w.quaternion.clone()
+                    const c = currentModel.worldToLocal(new THREE.Box3().setFromObject(w).getCenter(new THREE.Vector3()))
+                    w.userData.front = fwd ? c.x * fwd.x + c.z * fwd.z > 0 : c.z < 0
+                })
+            }
         },
         undefined,
         (err) => console.error('Error loading model:', err),
@@ -604,6 +644,13 @@ window.addEventListener('keyup', (e) => { keys[e.code] = false })
 
 let carSpeed = 0
 let carHeading = 0
+let wheelSign = 1       // flip if the wheels appear to roll backwards
+let wheelSpin = 0       // accumulated roll angle (around the axle, local X)
+let steerAngle = 0      // smoothed visual steer angle of the front wheels (around up, local Y)
+const _qSpin = new THREE.Quaternion()
+const _qSteer = new THREE.Quaternion()
+const _axAxle = new THREE.Vector3(1, 0, 0)
+const _axUp = new THREE.Vector3(0, 1, 0)
 const driveRaycaster = new THREE.Raycaster()
 driveRaycaster.firstHitOnly = true // three-mesh-bvh: stop at the first surface
 const DOWN = new THREE.Vector3(0, -1, 0)
@@ -659,6 +706,22 @@ function updateDrive(dt) {
     currentModel.position.addScaledVector(dir, carSpeed * dt)
     currentModel.rotation.y = carHeading + THREE.MathUtils.degToRad(d.headingOffset)
 
+    // Wheels: rear pair rolls; front pair rolls AND steers.
+    if (wheels.length) {
+        wheelSpin += ((carSpeed * dt) / wheelRadius) * wheelSign
+        // Smoothly ease the visual steer toward the input (max ~28°)
+        const steerTarget = steerIn * THREE.MathUtils.degToRad(28)
+        steerAngle = THREE.MathUtils.lerp(steerAngle, steerTarget, 0.2)
+        _qSpin.setFromAxisAngle(_axAxle, wheelSpin)     // roll, around the axle (local X)
+        _qSteer.setFromAxisAngle(_axUp, steerAngle)     // steer, around the car's vertical
+        for (const w of wheels) {
+            // steer in PARENT (car) space (pre-multiply) → pivots like a real kingpin;
+            // spin in LOCAL axle space (post-multiply) → rolls on the steered axle.
+            if (w.userData.front) w.quaternion.copy(_qSteer).multiply(w.userData.base).multiply(_qSpin)
+            else w.quaternion.copy(w.userData.base).multiply(_qSpin)
+        }
+    }
+
     // Stick to the road surface (throttled raycast → smoothed). Cast a short ray
     // starting just above the car so it locks to the road it's on, not overpass
     // roofs high above, and rest the WHEELS (not the pivot) on the surface.
@@ -675,13 +738,16 @@ function updateDrive(dt) {
         }
     }
 
-    window.__dbg = { carSpeed: +carSpeed.toFixed(2), throttle, dt: +dt.toFixed(4), kw: !!keys.KeyW }
-
-    // Chase camera
-    const behind = new THREE.Vector3(-Math.sin(carHeading), 0, -Math.cos(carHeading))
-    const desired = currentModel.position.clone()
-        .addScaledVector(behind, d.camDistance)
-        .add(new THREE.Vector3(0, d.camHeight, 0))
+    // Chase camera — follows the car holding the rear-3/4 "hero" angle. The
+    // offset tracks the car's body rotation (heading + headingOffset).
+    const camAz = THREE.MathUtils.degToRad(d.camAzimuth + d.headingOffset) + carHeading
+    const camEl = THREE.MathUtils.degToRad(d.camElevation)
+    const r = d.camDistance
+    const desired = currentModel.position.clone().add(new THREE.Vector3(
+        r * Math.cos(camEl) * Math.sin(camAz),
+        r * Math.sin(camEl) + 0.4,
+        r * Math.cos(camEl) * Math.cos(camAz),
+    ))
     camera.position.lerp(desired, 1 - Math.pow(0.0015, dt))
     camera.lookAt(currentModel.position.x, currentModel.position.y + 0.6, currentModel.position.z)
 }
@@ -693,35 +759,6 @@ driveFolder.add(CONFIG.drive, 'steer', 0.5, 4, 0.1).name('Steering')
 driveFolder.add(CONFIG.drive, 'groundFollow').name('Follow road')
 driveFolder.add(CONFIG.drive, 'headingOffset', -180, 180, 90).name('Nose align')
 
-// Debug helpers (synchronous — work even when the render loop is paused)
-window.__probeGround = (x, z) => {
-    const o = new THREE.Vector3(x, (currentModel?.position.y || 0) + 5, z)
-    driveRaycaster.set(o, DOWN)
-    driveRaycaster.far = 20
-    const h = driveRaycaster.intersectObject(envGroup, true)
-    return h.length ? +h[0].point.y.toFixed(3) : null
-}
-window.__placeCarAt = (x, z) => {
-    if (!currentModel) return null
-    const roadY = window.__probeGround(x, z)
-    currentModel.position.set(x, roadY != null ? roadY + carGroundOffset : currentModel.position.y, z)
-    return { x, z, roadY, carY: +currentModel.position.y.toFixed(3), offset: +carGroundOffset.toFixed(3) }
-}
-// Run the real drive logic synchronously (immune to the render loop being paused)
-window.__simDrive = (codes = ['KeyW'], steps = 30, dt = 0.05) => {
-    if (!currentModel) return null
-    codes.forEach((c) => (keys[c] = true))
-    const ys = []
-    for (let i = 0; i < steps; i++) { updateDrive(dt); ys.push(+currentModel.position.y.toFixed(2)) }
-    codes.forEach((c) => (keys[c] = false))
-    return {
-        pos: currentModel.position.toArray().map((n) => +n.toFixed(2)),
-        speed: +carSpeed.toFixed(2),
-        headingDeg: +THREE.MathUtils.radToDeg(carHeading).toFixed(1),
-        yTrack: ys.filter((_, i) => i % 6 === 0),
-    }
-}
-
 /**
  * Load model(s) + render loop
  */
@@ -731,18 +768,11 @@ else if (CONFIG.environment.enabled) loadEnvironment()
 
 const clock = new THREE.Clock()
 let previousTime = 0
-let perfEMA = 0
 
 const tick = () => {
     const elapsedTime = clock.getElapsedTime()
     const deltaTime = elapsedTime - previousTime
     previousTime = elapsedTime
-
-    // Rolling frame-time (for perf measurement; readable via window.__perf)
-    if (deltaTime > 0 && deltaTime < 1) {
-        perfEMA = perfEMA ? perfEMA * 0.9 + deltaTime * 0.1 : deltaTime
-        window.__perf = { ms: +(perfEMA * 1000).toFixed(1), fps: +(1 / perfEMA).toFixed(1) }
-    }
 
     if (mixer) mixer.update(deltaTime)
 
