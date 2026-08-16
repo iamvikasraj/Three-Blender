@@ -39,3 +39,30 @@ body
 {
     opacity: 0;
 }
+
+.drive-hint
+{
+    position: fixed;
+    bottom: 24px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #ffffff;
+    font-size: 13px;
+    letter-spacing: 0.04em;
+    padding: 9px 16px;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: 6px;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+}
+
+.drive-hint.is-visible
+{
+    opacity: 1;
+}
+
+.drive-hint b
+{
+    letter-spacing: 0.12em;
+}
