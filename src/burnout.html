@@ -9,7 +9,12 @@
         html, body { overflow: hidden; background: #0d0d14; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
         .webgl { position: fixed; top: 0; left: 0; outline: none; }
 
-        .hud { position: fixed; inset: 0; pointer-events: none; color: #fff; }
+        /* Hidden during car select, revealed when the race starts */
+        .hud {
+            position: fixed; inset: 0; pointer-events: none; color: #fff;
+            opacity: 0; transition: opacity .35s ease;
+        }
+        .hud.is-visible { opacity: 1; }
 
         .hud-speed {
             position: absolute; right: 36px; bottom: 30px;
@@ -51,11 +56,118 @@
             background: rgba(0,0,0,.4); border-radius: 6px; transition: opacity .4s ease;
         }
         .loading.is-hidden { opacity: 0; }
+
+        /* ── Car select (garage) ───────────────────────────────────────────── */
+        .garage {
+            position: fixed; inset: 0; color: #fff; z-index: 5;
+            font-family: 'Arial Narrow', 'Haettenschweiler', Impact, sans-serif;
+            opacity: 1; transition: opacity .35s ease;
+        }
+        .garage.is-hidden { opacity: 0; pointer-events: none; }
+
+        .garage__bar {
+            display: flex; align-items: flex-start; justify-content: space-between;
+            padding: 16px 26px 18px;
+            background: linear-gradient(180deg, rgba(12,10,8,.94), rgba(12,10,8,.55) 78%, transparent);
+            border-bottom: 2px solid rgba(255,196,0,.35);
+        }
+        .garage__title { display: flex; align-items: center; gap: 14px; }
+        .garage__hazard {
+            width: 16px; height: 58px; flex: none;
+            background: repeating-linear-gradient(-45deg, #ffc400 0 8px, #1a1a1a 8px 16px);
+        }
+        .garage__title h1 {
+            font-size: 46px; line-height: .92; letter-spacing: .02em; font-weight: 900;
+            text-transform: uppercase; text-shadow: 0 3px 10px rgba(0,0,0,.7);
+        }
+        .garage__title p {
+            font-size: 17px; letter-spacing: .16em; color: #d8d2c4; margin-top: 3px;
+        }
+        .garage__rank { text-align: right; }
+        .garage__rank span { font-size: 21px; letter-spacing: .1em; color: #ff4438; font-weight: 800; }
+        .garage__rank b {
+            display: block; font-size: 40px; line-height: .95; color: #ffc400;
+            font-style: italic; text-shadow: 0 3px 10px rgba(0,0,0,.7);
+        }
+
+        .garage__stats { position: absolute; top: 132px; left: 34px; }
+        .garage__stats h2 {
+            font-size: 40px; font-weight: 900; letter-spacing: .01em;
+            text-transform: uppercase; text-shadow: 0 3px 12px rgba(0,0,0,.8);
+        }
+        .garage__stat { margin-top: 20px; }
+        .garage__stat span {
+            display: block; font-size: 19px; letter-spacing: .11em; color: #efe9dc;
+            text-transform: uppercase; text-shadow: 0 2px 8px rgba(0,0,0,.8);
+        }
+        .garage__stat b {
+            font-size: 27px; color: #ffc400; letter-spacing: .04em; font-weight: 800;
+            text-shadow: 0 2px 8px rgba(0,0,0,.8);
+        }
+
+        .garage__picker {
+            position: absolute; left: 50%; bottom: 74px; transform: translateX(-50%);
+            display: flex; align-items: stretch; gap: 0; min-width: 620px;
+            background: linear-gradient(180deg, rgba(30,24,12,.9), rgba(12,10,8,.9));
+            border: 2px solid #ffc400; border-radius: 3px;
+        }
+        .garage__arrow {
+            width: 56px; display: grid; place-items: center; cursor: pointer;
+            background: repeating-linear-gradient(-45deg, #ffc400 0 8px, #1a1a1a 8px 16px);
+            color: #1a1a1a; font-size: 22px; border: none;
+        }
+        .garage__names {
+            flex: 1; display: flex; align-items: center; justify-content: center;
+            gap: 30px; padding: 12px 22px;
+        }
+        .garage__name {
+            font-size: 24px; letter-spacing: .07em; text-transform: uppercase;
+            color: #8d867a; white-space: nowrap;
+        }
+        .garage__name.is-active { color: #fff; font-weight: 800; text-shadow: 0 0 14px rgba(255,196,0,.6); }
+
+        .garage__footer {
+            position: absolute; left: 0; right: 0; bottom: 26px; text-align: center;
+            font-size: 16px; letter-spacing: .12em; color: #ded8ca; text-transform: uppercase;
+        }
+        .garage__footer b { color: #ffc400; }
     </style>
 </head>
 <body>
     <canvas class="webgl"></canvas>
     <div class="loading">Loading…</div>
+
+    <!-- Car select -->
+    <div class="garage" id="garage">
+        <div class="garage__bar">
+            <div class="garage__title">
+                <div class="garage__hazard"></div>
+                <div>
+                    <h1>Car Select</h1>
+                    <p>[ Choose Your Weapon ]</p>
+                </div>
+            </div>
+            <div class="garage__rank"><span>Your Rank</span><b>Elite</b></div>
+        </div>
+
+        <div class="garage__stats">
+            <h2 id="g-name">—</h2>
+            <div class="garage__stat"><span>Crashbreaker</span><b id="g-crash">—</b></div>
+            <div class="garage__stat"><span>Weight</span><b id="g-weight">—</b></div>
+            <div class="garage__stat"><span>Boost Speed</span><b id="g-boost">—</b></div>
+        </div>
+
+        <div class="garage__picker">
+            <button class="garage__arrow" id="g-prev" aria-label="Previous car">◀</button>
+            <div class="garage__names" id="g-names"></div>
+            <button class="garage__arrow" id="g-next" aria-label="Next car">▶</button>
+        </div>
+
+        <div class="garage__footer">
+            <b>A</b> / <b>D</b> or <b>◀ ▶</b> browse · <b>ENTER</b> select
+        </div>
+    </div>
+
     <div class="hud">
         <div class="boost" id="boost"><i id="boost-fill"></i></div>
         <div class="hud-speed"><b id="kmh">0</b><span>km/h</span></div>

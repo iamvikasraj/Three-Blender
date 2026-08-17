@@ -56,17 +56,22 @@ const HALF = { w: 0.92, h: 0.5, l: 2.2 } // chassis half-extents (m)
  *  modelYaw      rotation to bring the model's nose onto the rig's +Z forward
  */
 export const CARS = {
-    bmw: {
-        name: 'BMW M3 GTR',
-        path: '/models/bmw_m3_gtr_-_nfs_mw.glb',
-        wheelPattern: /^wheel\d*$/,
-        modelYaw: Math.PI, // model nose is −Z
-    },
     r190: {
         name: 'Factory R190 GT',
         path: '/models/cars/factory_r190_gt_burnout_revenge.glb',
         wheelPattern: /^Car1C_mesh_9\d{0,3}$/, // mesh_9, _9001, _9002, _9003
         modelYaw: 0, // model nose is already +Z (rear wing sits at −Z)
+        // Car-select stats + per-car handling overrides (merged over TUNING)
+        stats: { weight: 'LIGHT', boostMph: 209, crashbreaker: 'FORCE 1' },
+        tuning: { mass: 950, grip: 4.4, sideGrip: 3.2, maxSpeed: 56, boostMaxSpeed: 72 },
+    },
+    bmw: {
+        name: 'BMW M3 GTR',
+        path: '/models/bmw_m3_gtr_-_nfs_mw.glb',
+        wheelPattern: /^wheel\d*$/,
+        modelYaw: Math.PI, // model nose is −Z
+        stats: { weight: 'MEDIUM', boostMph: 196, crashbreaker: 'FORCE 2' },
+        tuning: { mass: 1100, grip: 4.8, sideGrip: 3.5, maxSpeed: 53, boostMaxSpeed: 68 },
     },
 }
 
@@ -88,6 +93,9 @@ export class Vehicle {
     }
 
     async load(scene, loadingManager) {
+        // Per-car handling overrides (weight class, grip, top speed)
+        Object.assign(TUNING, this.car.tuning ?? {})
+
         // Physics body
         this.body = world.createRigidBody(
             RAPIER.RigidBodyDesc.dynamic().setTranslation(-2.2, 1.4, 0).setCanSleep(false),

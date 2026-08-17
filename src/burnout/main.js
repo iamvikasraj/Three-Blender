@@ -13,6 +13,7 @@ import { Traffic } from './traffic.js'
 import { CrashDirector } from './crash.js'
 import { dent } from './deform.js'
 import { loadCircuit, findRoadSurface, findSpawnOnRoad, probeGround } from './circuit.js'
+import { Garage } from './garage.js'
 
 /**
  * Burnout-style prototype — orchestration.
@@ -63,6 +64,7 @@ window.addEventListener('resize', () => {
     camera.updateProjectionMatrix()
     renderer.setSize(sizes.width, sizes.height)
     composer.setSize(sizes.width, sizes.height)
+    garage?.resize(sizes.width, sizes.height)
 })
 
 // ── Input ────────────────────────────────────────────────────────────────────
@@ -70,6 +72,13 @@ const keys = {}
 window.addEventListener('keydown', (e) => {
     keys[e.code] = true
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault()
+
+    // Car-select navigation (garage state only)
+    if (typeof state !== 'undefined' && state === 'garage') {
+        if (e.code === 'KeyA' || e.code === 'ArrowLeft') { garage.cycle(-1); paintGarage() }
+        else if (e.code === 'KeyD' || e.code === 'ArrowRight') { garage.cycle(1); paintGarage() }
+        else if (e.code === 'Enter' || e.code === 'Space') { startRace() }
+    }
 })
 window.addEventListener('keyup', (e) => { keys[e.code] = false })
 
@@ -89,41 +98,87 @@ if (USE_CIRCUIT) {
         '→', circuit.bounds.max.toArray().map((n) => n.toFixed(0)).join(','))
 }
 
-const vehicle = new Vehicle(CARS.r190) // swap to CARS.bmw for the M3 GTR
-await vehicle.load(scene)
+// Find the spawn now so the race can start the instant a car is chosen
 let spawnPoint = null
-
-// Seat the car on the circuit surface
 if (circuit) {
     const road = findRoadSurface(circuit.root)
     if (road) console.log(`[CIRCUIT] road surface: ${Math.round(road.area)} m², ${road.points.length} tris`)
     spawnPoint = findSpawnOnRoad(road)
+    if (spawnPoint) console.log('[CIRCUIT] spawn', spawnPoint)
+    else console.warn('[CIRCUIT] no road spawn found — using default position')
+}
+
+// ── Car select ───────────────────────────────────────────────────────────────
+let state = 'garage'        // 'garage' | 'race'
+let vehicle = null
+let chaseCam = null
+let speedLines = null
+let traffic = null
+let crash = null
+let gui = null
+
+const garage = new Garage(renderer)
+await garage.load()
+garage.resize(sizes.width, sizes.height)
+loadingEl?.classList.add('is-hidden')
+
+const garageEl = document.querySelector('#garage')
+const namesEl = document.querySelector('#g-names')
+const nameEl = document.querySelector('#g-name')
+const crashEl = document.querySelector('#g-crash')
+const weightEl = document.querySelector('#g-weight')
+const boostEl = document.querySelector('#g-boost')
+
+function paintGarage() {
+    const car = garage.currentCar
+    nameEl.textContent = car.name
+    crashEl.textContent = car.stats?.crashbreaker ?? '—'
+    weightEl.textContent = car.stats?.weight ?? '—'
+    boostEl.textContent = car.stats?.boostMph ? `${car.stats.boostMph} MPH` : '—'
+    namesEl.innerHTML = garage.keys
+        .map((k) => `<span class="garage__name${k === garage.current ? ' is-active' : ''}">${CARS[k].name}</span>`)
+        .join('')
+}
+paintGarage()
+
+document.querySelector('#g-prev').addEventListener('click', () => { garage.cycle(-1); paintGarage() })
+document.querySelector('#g-next').addEventListener('click', () => { garage.cycle(1); paintGarage() })
+
+async function startRace() {
+    const car = CARS[garage.select()]
+    state = 'loading'
+    garageEl?.classList.add('is-hidden')
+
+    vehicle = new Vehicle(car)
+    await vehicle.load(scene)
+
     if (spawnPoint) {
-        console.log('[CIRCUIT] spawn', spawnPoint)
         vehicle.body.setTranslation({ x: spawnPoint.x, y: spawnPoint.y + 1.6, z: spawnPoint.z }, true)
-        // Face down the road so the chase camera looks along it
         const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), spawnPoint.heading)
         vehicle.body.setRotation({ x: q.x, y: q.y, z: q.z, w: q.w }, true)
         vehicle.body.setLinvel({ x: 0, y: 0, z: 0 }, true)
-    } else {
-        console.warn('[CIRCUIT] no road spawn found — using default position')
     }
-}
-loadingEl?.classList.add('is-hidden')
 
-const chaseCam = new ChaseCamera(camera)
-const speedLines = new SpeedLines(camera)
-const traffic = new Traffic()
-if (!USE_CIRCUIT) traffic.build(scene) // lane traffic is highway-only for now
-const crash = new CrashDirector(scene, vehicle, chaseCam, banner)
-if (spawnPoint) {
-    // R / respawn returns to the road spawn rather than the highway default
-    crash.safe.pos.set(spawnPoint.x, spawnPoint.y + 0.6, spawnPoint.z)
-    crash.safe.heading = spawnPoint.heading
+    chaseCam = new ChaseCamera(camera)
+    speedLines = new SpeedLines(camera)
+    traffic = new Traffic()
+    if (!USE_CIRCUIT) traffic.build(scene) // lane traffic is highway-only for now
+    crash = new CrashDirector(scene, vehicle, chaseCam, banner)
+    if (spawnPoint) {
+        // R / respawn returns to the road spawn rather than the highway default
+        crash.safe.pos.set(spawnPoint.x, spawnPoint.y + 0.6, spawnPoint.z)
+        crash.safe.heading = spawnPoint.heading
+    }
+
+    garage.dispose()
+    buildGui()
+    document.querySelector('.hud')?.classList.add('is-visible')
+    state = 'race'
 }
 
 // ── Tuning GUI ───────────────────────────────────────────────────────────────
-const gui = new GUI({ title: 'Tuning' })
+function buildGui() {
+gui = new GUI({ title: 'Tuning' })
 
 const fGrip = gui.addFolder('Grip & slide')
 fGrip.add(TUNING, 'sideGrip', 0.2, 6, 0.05).name('Lateral grip ← slide')
@@ -168,6 +223,7 @@ fFov.add(CAMERA, 'shakeStart', 0.2, 1, 0.01).name('Shake starts')
 fFov.add(CAMERA, 'shakeAmp', 0, 0.3, 0.005).name('Shake amount')
 fFov.add(CAMERA, 'blurMax', 0, 0.2, 0.005).name('Motion blur')
 fFov.close()
+}
 
 // ── Loop ─────────────────────────────────────────────────────────────────────
 const clock = new THREE.Clock()
@@ -176,6 +232,16 @@ let totalDist = 0 // metres driven — ramps the difficulty (traffic gap tighten
 
 const tick = () => {
     const dt = Math.min(clock.getDelta(), 0.05)
+
+    // Car select: spin the turntable, wait for a pick
+    if (state !== 'race') {
+        if (state === 'garage') {
+            garage.update(dt)
+            garage.render()
+        }
+        window.requestAnimationFrame(tick)
+        return
+    }
 
     // Read input → vehicle
     vehicle.input.throttle = (keys.KeyW || keys.ArrowUp) ? 1 : (keys.KeyS || keys.ArrowDown) ? -1 : 0
