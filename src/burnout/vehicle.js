@@ -20,25 +20,25 @@ export const TUNING = {
     // ── Burnout-style arcade feel ────────────────────────────────────────────
     // Light, punchy and always steerable. The car should change direction NOW,
     // never wallow, and never feel like it's carrying realistic weight.
-    mass: 900,               // lighter than a sim car — less inertia to fight
-    enginePower: 20000,      // punchy launch (was 10500, which felt sluggish)
+    mass: 1000,              // substantial like the real game, not featherweight
+    enginePower: 14000,      // strong pull without being violent
     brakeForce: 55,
-    maxSpeed: 78,            // ~280 km/h
-    boostMaxSpeed: 100,      // ~360 km/h on boost
-    // Steering: a big lock that stays usable at speed. steerFalloff was the main
-    // culprit for the "heavy" feel — at 0.055 the lock collapsed to ~6° at top
-    // speed, so the car couldn't dodge traffic.
-    steerMax: 0.62,
-    steerFalloff: 0.018,     // gentle falloff → still ~14° of lock flat out
-    steerLerp: 20,           // snappy wheel response (was 9)
-    // Stiffer, shorter suspension: less body float, more go-kart
-    suspension: { rest: 0.3, stiffness: 62, compression: 3.4, relaxation: 4.2, travel: 0.18 },
-    grip: 5.2,               // bites hard so turn-in is immediate
-    sideGrip: 1.4,
+    maxSpeed: 56,            // ~200 km/h — real-game pace, actually controllable
+    boostMaxSpeed: 72,       // ~260 km/h on boost
+    // Steering stays usable at speed (the original 0.055 falloff collapsed the
+    // lock to ~6° flat out and felt like a truck), but calm enough to hold a
+    // line instead of darting.
+    steerMax: 0.55,
+    steerFalloff: 0.026,     // ~13° of lock at top speed
+    steerLerp: 15,           // responsive, still smooth
+    // Firm but not rigid — the car settles instead of floating or skittering
+    suspension: { rest: 0.3, stiffness: 58, compression: 3.2, relaxation: 4.0, travel: 0.2 },
+    grip: 4.4,               // planted, with a little slide available
+    sideGrip: 1.25,
     driftGripRear: 0.55,     // lower rear grip → bigger, easier slides
     driftSideRear: 0.14,
-    driftYawKick: 620,       // exaggerated arcade rotation into the drift
-    boostAccel: 26,
+    driftYawKick: 560,       // exaggerated arcade rotation into the drift
+    boostAccel: 18,
     boostDrain: 30,
     boostRegen: 13,
     boostOnCheck: 30,

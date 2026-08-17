@@ -214,5 +214,36 @@ export function findSpawnOnRoad(road) {
         // ang is measured from +X; our heading is measured from +Z
         heading = Math.atan2(Math.cos(ang), Math.sin(ang))
     }
-    return { x: seed.x, y: seed.y, z: seed.z, heading, neighbours: bestN }
+    const width = measureRoadWidth(road.mesh, seed, heading)
+    console.log(`[ROAD] this road is ${width.toFixed(1)} m wide`,
+        `(→ ${(width / 3.5).toFixed(1)} lanes at the current scale)`)
+
+    return { x: seed.x, y: seed.y, z: seed.z, heading, neighbours: bestN, roadWidth: width }
+}
+
+/**
+ * Width of the single road under `at`, by stepping sideways and raycasting down
+ * onto ONLY the road mesh until the tarmac runs out. Unlike a point-cloud
+ * slice this can't be fooled by parallel streets sharing the same material.
+ */
+export function measureRoadWidth(roadMesh, at, heading, limit = 400) {
+    const rc = new THREE.Raycaster()
+    rc.far = 1e4
+    const down = new THREE.Vector3(0, -1, 0)
+    // Perpendicular to the heading, on the ground plane
+    const px = -Math.cos(heading), pz = Math.sin(heading)
+    const step = Math.max(0.25, limit / 400)
+
+    const edge = (sign) => {
+        let d = 0
+        for (; d < limit; d += step) {
+            const o = new THREE.Vector3(
+                at.x + px * d * sign, at.y + 40, at.z + pz * d * sign,
+            )
+            rc.set(o, down)
+            if (rc.intersectObject(roadMesh, false).length === 0) break
+        }
+        return d
+    }
+    return edge(1) + edge(-1)
 }

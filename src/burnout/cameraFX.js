@@ -10,12 +10,15 @@ import * as THREE from 'three'
  *  SHAKE_START/SHAKE_AMP         when micro-shake kicks in and how hard
  *  BLUR_MAX                      radial blur strength ceiling
  */
-export const FOV_BASE = 60
-export const FOV_SPEED = 18
-export const FOV_BOOST = 12
+// A tighter, lower camera makes the car read BIG against the city and gives a
+// stronger sense of contact with the road (a far camera + wide FOV was what made
+// the car look small relative to the map).
+export const FOV_BASE = 54
+export const FOV_SPEED = 14
+export const FOV_BOOST = 10
 export const CHASE_AZIMUTH = 0   // 0 = dead-centre behind; 48 = rear-3/4 hero
-export const CHASE_DIST = 7.0
-export const CHASE_HEIGHT = 2.4
+export const CHASE_DIST = 4.4    // close on the tail
+export const CHASE_HEIGHT = 1.3  // low — roughly roof height, hugs the road
 export const SHAKE_START = 0.72
 export const SHAKE_AMP = 0.06
 export const BLUR_MAX = 0.05
@@ -72,7 +75,9 @@ export class ChaseCamera {
             cam.position.y += (Math.random() - 0.5) * a * 0.6
         }
 
-        const look = new THREE.Vector3(p.x + fwd.x * 5, p.y + 0.9, p.z + fwd.z * 5)
+        // Aim just over the roof and further down the road, so a low camera
+        // still shows what's coming rather than staring at the rear wing.
+        const look = new THREE.Vector3(p.x + fwd.x * 12, p.y + 1.25, p.z + fwd.z * 12)
         cam.lookAt(look)
 
         // Dynamic FOV: stretches with speed, lunges on boost
