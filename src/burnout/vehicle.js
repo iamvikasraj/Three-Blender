@@ -34,7 +34,9 @@ export const TUNING = {
     // Firm but not rigid — the car settles instead of floating or skittering
     suspension: { rest: 0.3, stiffness: 58, compression: 3.2, relaxation: 4.0, travel: 0.2 },
     grip: 4.4,               // planted, with a little slide available
-    sideGrip: 1.25,
+    // Lateral grip. This is the dial that stops the car sliding while merely
+    // steering — too low and it drifts through every corner unintentionally.
+    sideGrip: 3.2,
     driftGripRear: 0.55,     // lower rear grip → bigger, easier slides
     driftSideRear: 0.14,
     driftYawKick: 560,       // exaggerated arcade rotation into the drift
@@ -154,6 +156,18 @@ export class Vehicle {
         console.log(`[CAR] ${this.car.name}: ${this.wheels.length} wheels, r=${this.wheelRadius.toFixed(2)}m`)
     }
 
+    /** Re-push suspension settings (call after changing them in the GUI). */
+    applySuspension() {
+        if (!this.controller) return
+        const s = TUNING.suspension
+        for (let i = 0; i < 4; i++) {
+            this.controller.setWheelSuspensionStiffness(i, s.stiffness)
+            this.controller.setWheelSuspensionCompression(i, s.compression)
+            this.controller.setWheelSuspensionRelaxation(i, s.relaxation)
+            this.controller.setWheelMaxSuspensionTravel(i, s.travel)
+        }
+    }
+
     /** Runs before every physics substep (fixed dt). */
     substep(dt) {
         if (!this.controller) return
@@ -195,7 +209,12 @@ export class Vehicle {
         this.controller.setWheelBrake(2, brake)
         this.controller.setWheelBrake(3, brake)
 
-        // Handbrake drift: rear grip drops + exaggerated yaw kick into the turn
+        // Grip is pushed every substep (not just at load) so GUI tweaks apply
+        // live. Handbrake drops the REAR grip only → the tail steps out.
+        this.controller.setWheelFrictionSlip(0, t.grip)
+        this.controller.setWheelFrictionSlip(1, t.grip)
+        this.controller.setWheelSideFrictionStiffness(0, t.sideGrip)
+        this.controller.setWheelSideFrictionStiffness(1, t.sideGrip)
         const rearGrip = handbrake ? t.driftGripRear : t.grip
         const rearSide = handbrake ? t.driftSideRear : t.sideGrip
         this.controller.setWheelFrictionSlip(2, rearGrip)

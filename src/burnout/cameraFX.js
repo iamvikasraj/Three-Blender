@@ -10,18 +10,25 @@ import * as THREE from 'three'
  *  SHAKE_START/SHAKE_AMP         when micro-shake kicks in and how hard
  *  BLUR_MAX                      radial blur strength ceiling
  */
-// A tighter, lower camera makes the car read BIG against the city and gives a
-// stronger sense of contact with the road (a far camera + wide FOV was what made
-// the car look small relative to the map).
-export const FOV_BASE = 54
-export const FOV_SPEED = 14
-export const FOV_BOOST = 10
-export const CHASE_AZIMUTH = 0   // 0 = dead-centre behind; 48 = rear-3/4 hero
-export const CHASE_DIST = 4.4    // close on the tail
-export const CHASE_HEIGHT = 1.3  // low — roughly roof height, hugs the road
-export const SHAKE_START = 0.72
-export const SHAKE_AMP = 0.06
-export const BLUR_MAX = 0.05
+/**
+ * Live camera config — every field is exposed in the GUI so the feel can be
+ * dialled in while driving. A tighter, lower camera makes the car read BIG
+ * against the city; a far camera behind a wide FOV made it look small.
+ */
+export const CAMERA = {
+    azimuth: 0,      // 0 = dead-centre behind; 48 = rear-3/4 hero angle
+    dist: 4.4,       // how far behind the car
+    height: 1.3,     // roughly roof height — hugs the road
+    lookAhead: 12,   // aim this far down the road (keeps a low cam useful)
+    lookHeight: 1.25,
+    fovBase: 54,     // FOV at rest
+    fovSpeed: 14,    // extra FOV at top speed
+    fovBoost: 10,    // extra FOV while boosting
+    shakeStart: 0.72, // speed fraction where micro-shake begins
+    shakeAmp: 0.06,
+    blurMax: 0.05,   // radial motion-blur ceiling
+    followLag: 0.0008, // lower = snappier follow
+}
 
 export class ChaseCamera {
     constructor(camera) {
@@ -46,43 +53,47 @@ export class ChaseCamera {
             )
             cam.position.lerp(target, 1 - Math.pow(0.001, dt))
             cam.lookAt(p.x, p.y + 0.4, p.z)
-            cam.fov += (FOV_BASE - cam.fov) * Math.min(1, dt * 3)
+            cam.fov += (CAMERA.fovBase - cam.fov) * Math.min(1, dt * 3)
             cam.updateProjectionMatrix()
             return
         }
 
-        // Chase: centered directly behind the car so the road ahead reads
-        // symmetrically (CHASE_AZIMUTH = 0). Raise it for a rear-3/4 hero look.
+        // Chase: offset `azimuth` degrees off the car's tail (0 = dead-centre,
+        // so the road ahead reads symmetrically).
         const p = vehicle.position()
         const fwd = vehicle.forward()
-        const az = THREE.MathUtils.degToRad(CHASE_AZIMUTH)
+        const az = THREE.MathUtils.degToRad(CAMERA.azimuth)
         const bx = -fwd.x, bz = -fwd.z // dead-rear direction
         const ox = bx * Math.cos(az) + bz * Math.sin(az)
         const oz = -bx * Math.sin(az) + bz * Math.cos(az)
         const desired = new THREE.Vector3(
-            p.x + ox * CHASE_DIST,
-            p.y + CHASE_HEIGHT,
-            p.z + oz * CHASE_DIST,
+            p.x + ox * CAMERA.dist,
+            p.y + CAMERA.height,
+            p.z + oz * CAMERA.dist,
         )
         if (this.snap) { cam.position.copy(desired); this.snap = false }
-        else cam.position.lerp(desired, 1 - Math.pow(0.0008, dt))
+        else cam.position.lerp(desired, 1 - Math.pow(CAMERA.followLag, dt))
 
         // Micro-shake at top speed
-        const over = Math.max(0, vehicle.speed01 - SHAKE_START)
+        const over = Math.max(0, vehicle.speed01 - CAMERA.shakeStart)
         if (over > 0) {
-            const a = SHAKE_AMP * (over / (1 - SHAKE_START)) * (boosting ? 1.5 : 1)
+            const a = CAMERA.shakeAmp * (over / (1 - CAMERA.shakeStart)) * (boosting ? 1.5 : 1)
             cam.position.x += (Math.random() - 0.5) * a
             cam.position.y += (Math.random() - 0.5) * a * 0.6
         }
 
-        // Aim just over the roof and further down the road, so a low camera
-        // still shows what's coming rather than staring at the rear wing.
-        const look = new THREE.Vector3(p.x + fwd.x * 12, p.y + 1.25, p.z + fwd.z * 12)
+        // Aim down the road, so a low camera still shows what's coming rather
+        // than staring at the rear wing.
+        const look = new THREE.Vector3(
+            p.x + fwd.x * CAMERA.lookAhead,
+            p.y + CAMERA.lookHeight,
+            p.z + fwd.z * CAMERA.lookAhead,
+        )
         cam.lookAt(look)
 
         // Dynamic FOV: stretches with speed, lunges on boost
         this.fovBlend += ((boosting ? 1 : 0) - this.fovBlend) * Math.min(1, dt * 4)
-        const fov = FOV_BASE + vehicle.speed01 * FOV_SPEED + this.fovBlend * FOV_BOOST
+        const fov = CAMERA.fovBase + vehicle.speed01 * CAMERA.fovSpeed + this.fovBlend * CAMERA.fovBoost
         cam.fov += (fov - cam.fov) * Math.min(1, dt * 6)
         cam.updateProjectionMatrix()
     }
