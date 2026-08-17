@@ -17,23 +17,30 @@ import { world, RAPIER } from './physics.js'
  *  boostDrain/Regen/OnCheck  boost meter economy (0–100)
  */
 export const TUNING = {
-    mass: 1100,
-    enginePower: 10500,
-    brakeForce: 45,
-    maxSpeed: 72,
-    boostMaxSpeed: 92,
-    steerMax: 0.5,
-    steerFalloff: 0.055,
-    steerLerp: 9,
-    suspension: { rest: 0.34, stiffness: 46, compression: 2.6, relaxation: 3.4, travel: 0.26 },
-    grip: 3.4,
-    sideGrip: 1.0,
-    driftGripRear: 0.8,
-    driftSideRear: 0.24,
-    driftYawKick: 330,
-    boostAccel: 15,
-    boostDrain: 34,
-    boostRegen: 11,
+    // ── Burnout-style arcade feel ────────────────────────────────────────────
+    // Light, punchy and always steerable. The car should change direction NOW,
+    // never wallow, and never feel like it's carrying realistic weight.
+    mass: 900,               // lighter than a sim car — less inertia to fight
+    enginePower: 20000,      // punchy launch (was 10500, which felt sluggish)
+    brakeForce: 55,
+    maxSpeed: 78,            // ~280 km/h
+    boostMaxSpeed: 100,      // ~360 km/h on boost
+    // Steering: a big lock that stays usable at speed. steerFalloff was the main
+    // culprit for the "heavy" feel — at 0.055 the lock collapsed to ~6° at top
+    // speed, so the car couldn't dodge traffic.
+    steerMax: 0.62,
+    steerFalloff: 0.018,     // gentle falloff → still ~14° of lock flat out
+    steerLerp: 20,           // snappy wheel response (was 9)
+    // Stiffer, shorter suspension: less body float, more go-kart
+    suspension: { rest: 0.3, stiffness: 62, compression: 3.4, relaxation: 4.2, travel: 0.18 },
+    grip: 5.2,               // bites hard so turn-in is immediate
+    sideGrip: 1.4,
+    driftGripRear: 0.55,     // lower rear grip → bigger, easier slides
+    driftSideRear: 0.14,
+    driftYawKick: 620,       // exaggerated arcade rotation into the drift
+    boostAccel: 26,
+    boostDrain: 30,
+    boostRegen: 13,
     boostOnCheck: 30,
 }
 
@@ -177,8 +184,14 @@ export class Vehicle {
             if (this.speed > 1) brake = t.brakeForce
             else engine = -t.enginePower * 0.5
         }
+        // Rear-dominant AWD: the fronts pull too (arcade punch out of corners),
+        // but the rears drive harder so handbrake slides still rotate the car.
+        this.controller.setWheelEngineForce(0, engine * 0.45)
+        this.controller.setWheelEngineForce(1, engine * 0.45)
         this.controller.setWheelEngineForce(2, engine)
         this.controller.setWheelEngineForce(3, engine)
+        this.controller.setWheelBrake(0, brake * 0.6)
+        this.controller.setWheelBrake(1, brake * 0.6)
         this.controller.setWheelBrake(2, brake)
         this.controller.setWheelBrake(3, brake)
 
