@@ -62,6 +62,43 @@ body
     opacity: 1;
 }
 
+.speedo
+{
+    position: fixed;
+    right: 34px;
+    bottom: 30px;
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    color: #ffffff;
+    text-shadow: 0 2px 12px rgba(0, 0, 0, 0.55);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    font-variant-numeric: tabular-nums;
+}
+
+.speedo.is-visible
+{
+    opacity: 1;
+}
+
+.speedo__val
+{
+    font-size: 64px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    line-height: 1;
+}
+
+.speedo__unit
+{
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    opacity: 0.8;
+}
+
 .drive-hint b
 {
     letter-spacing: 0.12em;

@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Burnout Prototype</title>
+    <style>
+        * { margin: 0; padding: 0; }
+        html, body { overflow: hidden; background: #0d0d14; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        .webgl { position: fixed; top: 0; left: 0; outline: none; }
+
+        .hud { position: fixed; inset: 0; pointer-events: none; color: #fff; }
+
+        .hud-speed {
+            position: absolute; right: 36px; bottom: 30px;
+            display: flex; align-items: baseline; gap: 6px;
+            text-shadow: 0 2px 14px rgba(0,0,0,.6); font-variant-numeric: tabular-nums;
+        }
+        .hud-speed b { font-size: 64px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
+        .hud-speed span { font-size: 15px; font-weight: 600; letter-spacing: .08em; opacity: .8; }
+
+        .boost {
+            position: absolute; right: 36px; bottom: 108px; width: 220px; height: 10px;
+            background: rgba(255,255,255,.14); border-radius: 5px; overflow: hidden;
+        }
+        .boost i {
+            display: block; height: 100%; width: 100%;
+            background: linear-gradient(90deg, #ff9a2e, #ff4e16);
+            transform-origin: left; transform: scaleX(1); border-radius: 5px;
+        }
+        .boost.is-active i { background: linear-gradient(90deg, #ffd12e, #ff7a16); box-shadow: 0 0 14px #ff7a16; }
+
+        .crash-banner {
+            position: absolute; top: 34%; left: 0; right: 0; text-align: center;
+            font-size: 72px; font-weight: 800; letter-spacing: .14em; font-style: italic;
+            color: #ff5a1f; text-shadow: 0 4px 30px rgba(0,0,0,.8);
+            opacity: 0; transition: opacity .12s ease;
+        }
+        .crash-banner.is-visible { opacity: 1; }
+
+        .hint {
+            position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+            font-size: 13px; letter-spacing: .04em; padding: 9px 16px;
+            background: rgba(0,0,0,.5); border-radius: 6px; white-space: nowrap;
+        }
+        .hint b { letter-spacing: .1em; }
+
+        .loading {
+            position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+            color: #fff; font-size: 14px; letter-spacing: .05em; padding: 10px 18px;
+            background: rgba(0,0,0,.4); border-radius: 6px; transition: opacity .4s ease;
+        }
+        .loading.is-hidden { opacity: 0; }
+    </style>
+</head>
+<body>
+    <canvas class="webgl"></canvas>
+    <div class="loading">Loading…</div>
+    <div class="hud">
+        <div class="boost" id="boost"><i id="boost-fill"></i></div>
+        <div class="hud-speed"><b id="kmh">0</b><span>km/h</span></div>
+        <div class="crash-banner" id="crash-banner">CRASHED</div>
+        <div class="hint"><b>W A S D</b> drive · <b>SPACE</b> drift · <b>SHIFT</b> boost · crash steer = aftertouch · <b>R</b> reset</div>
+    </div>
+    <script type="module" src="./burnout/main.js"></script>
+</body>
+</html>

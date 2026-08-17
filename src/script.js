@@ -92,17 +92,18 @@ const CONFIG = {
     // Arcade drive mode ─ WASD / arrows to drive the car around the map.
     // No collision yet; a downward raycast keeps the car on the road surface.
     drive: {
-        enabled: false,
-        maxSpeed: 9,        // world units / sec forward
-        reverseMax: 4,
-        accel: 14,          // how fast it speeds up
-        friction: 4,        // coast-down when off the throttle
-        steer: 1.9,         // turn rate (radians/sec at speed)
+        enabled: true,      // start in drive mode (chase cam uses the hero framing)
+        // Physics in real-world units (km/h, m/s²). Scene scale is derived from
+        // the car's real length so speeds and distances are believable.
+        maxKmh: 200,        // top speed
+        reverseKmh: 35,
+        accel: 8,           // m/s² engine acceleration (tapers toward top speed)
+        brakeDecel: 22,     // m/s² braking
+        coastDecel: 3.5,    // m/s² engine braking when off the throttle
+        maxSteerDeg: 24,    // front-wheel steering lock
         groundFollow: true, // raycast down onto the map so it follows hills
         headingOffset: 0,   // degrees, auto-set at load to align the nose with travel
-        camDistance: 6.5,   // chase camera distance from the car (world units)
-        camElevation: 9,    // chase camera height angle (deg) — low & cinematic
-        camAzimuth: 48,     // rear-3/4 offset (matches the hero menu angle)
+        mute: false,        // engine sound
     },
     // "Most Wanted" cinematic look ─ toggle any of these live in the GUI
     cinematic: {
@@ -168,6 +169,12 @@ const carHome = { position: new THREE.Vector3(), rotationY: 0 } // spawn transfo
 let carGroundOffset = 0 // distance from the car's pivot down to its wheels (so it rests ON roads)
 const wheels = []       // wheel nodes, spun while driving
 let wheelRadius = 0.34  // world units, derived from the model
+let carFitDist = 3      // camera distance that frames the car (set in frameModel)
+let carSizeY = 1        // car height, for the small look-up offset
+let carWorldLength = 2  // car length in world units (set in frameModel)
+let metersPerUnit = 2.235 // scene scale: real metres per world unit
+let wheelbaseWorld = 1.2  // front↔rear axle distance (world units)
+const REAL_CAR_LENGTH_M = 4.47 // BMW M3 E46 length, used to scale the world
 
 function clearCurrentModel() {
     if (!currentModel) return
@@ -210,6 +217,11 @@ function frameModel(object) {
         const center3 = box3.getCenter(new THREE.Vector3())
         const maxDim = Math.max(size3.x, size3.y, size3.z) || 1
         const dist = maxDim / (2 * Math.tan((camera.fov * Math.PI) / 360))
+        carFitDist = dist       // reused by the drive chase camera
+        carSizeY = size3.y
+        carWorldLength = maxDim // real-world scale is derived from this
+        metersPerUnit = REAL_CAR_LENGTH_M / carWorldLength
+        wheelbaseWorld = carWorldLength * 0.58
 
         if (CONFIG.camera.heroAngle) {
             // Low, dramatic 3/4-front angle like the garage menu, via spherical coords
@@ -304,8 +316,14 @@ function loadModel(path) {
                     w.userData.base = w.quaternion.clone()
                     const c = currentModel.worldToLocal(new THREE.Box3().setFromObject(w).getCenter(new THREE.Vector3()))
                     w.userData.front = fwd ? c.x * fwd.x + c.z * fwd.z > 0 : c.z < 0
+                    // True vertical steering axis, expressed in the wheel's (possibly
+                    // tilted) parent space, so front wheels pivot flat like a kingpin.
+                    w.userData.steerAxis = new THREE.Vector3(0, 1, 0)
+                        .applyQuaternion(w.parent.getWorldQuaternion(new THREE.Quaternion()).invert())
+                        .normalize()
                 })
             }
+            if (CONFIG.drive.enabled) enterDrive() // start driving straight away
         },
         undefined,
         (err) => console.error('Error loading model:', err),
@@ -361,57 +379,100 @@ function loadEnvironment() {
     })
 }
 
+let skyMaterial = null   // animated sky (clouds drift)
+let grassMaterial = null // animated grass (wind + reacts to the car)
+
 /**
- * Test track — a clean flat course for tuning the driving feel.
- * The drivable surfaces go into envGroup so the same ground-follow raycast works.
+ * Sunset drive — an open field of wind-blown grass under a soft pastel sky,
+ * so the car looks like it's cruising through a meadow at dusk. The grass bends
+ * away from the car as it passes. The ground goes into envGroup so the same
+ * ground-follow raycast keeps the wheels planted.
  */
 function buildTestTrack() {
-    const size = CONFIG.testTrack.size
+    // ── Soft pastel sky with drifting clouds ──────────────────────────────────
+    skyMaterial = new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        fog: false,
+        depthWrite: false,
+        uniforms: {
+            uTime: { value: 0 },
+            uZenith: { value: new THREE.Color('#8fa6c4') },   // soft blue-grey top
+            uMid: { value: new THREE.Color('#d9b6c6') },      // lavender-pink band
+            uHorizon: { value: new THREE.Color('#f7c7a3') },  // warm peach horizon
+            uGround: { value: new THREE.Color('#cdb79a') },   // hazy below horizon
+            uCloudLit: { value: new THREE.Color('#fbe3d4') }, // sunlit cloud
+            uCloudShad: { value: new THREE.Color('#9d9bb0') },// cloud shadow
+        },
+        vertexShader: /* glsl */`
+            varying vec3 vDir;
+            void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+        `,
+        fragmentShader: /* glsl */`
+            varying vec3 vDir;
+            uniform float uTime;
+            uniform vec3 uZenith, uMid, uHorizon, uGround, uCloudLit, uCloudShad;
+            float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1,311.7)))*43758.5453); }
+            float noise(vec2 p){ vec2 i=floor(p), f=fract(p); f=f*f*(3.0-2.0*f);
+                float a=hash(i), b=hash(i+vec2(1,0)), c=hash(i+vec2(0,1)), d=hash(i+vec2(1,1));
+                return mix(mix(a,b,f.x), mix(c,d,f.x), f.y); }
+            float fbm(vec2 p){ float v=0.0, a=0.5; for(int i=0;i<5;i++){ v+=a*noise(p); p=p*2.02; a*=0.5; } return v; }
+            void main(){
+                float h = clamp(vDir.y, -1.0, 1.0);
+                // vertical gradient: horizon → mid band → zenith (and haze below)
+                vec3 col = mix(uHorizon, uMid, smoothstep(0.0, 0.35, h));
+                col = mix(col, uZenith, smoothstep(0.30, 0.9, h));
+                col = mix(uGround, col, smoothstep(-0.15, 0.02, h));
+                // wispy clouds, projected onto the sky and drifting over time
+                vec2 uv = vDir.xz / max(h + 0.28, 0.12);
+                float clouds = fbm(uv * 1.1 + vec2(uTime * 0.008, uTime * 0.003));
+                clouds = smoothstep(0.42, 0.95, clouds);
+                float band = smoothstep(0.02, 0.22, h) * smoothstep(1.0, 0.32, h); // keep to mid-sky
+                float amt = clouds * band;
+                vec3 cloudCol = mix(uCloudShad, uCloudLit, smoothstep(0.3, 0.9, clouds));
+                col = mix(col, cloudCol, amt * 0.85);
+                gl_FragColor = vec4(col, 1.0);
+            }
+        `,
+    })
+    scene.add(new THREE.Mesh(new THREE.SphereGeometry(1200, 48, 24), skyMaterial))
 
+    // ── Ground (drivable) ─────────────────────────────────────────────────────
     const ground = new THREE.Mesh(
-        new THREE.PlaneGeometry(size, size),
-        new THREE.MeshStandardMaterial({ color: '#2b2b30', roughness: 0.95, metalness: 0 }),
+        new THREE.PlaneGeometry(6000, 6000),
+        new THREE.MeshStandardMaterial({ color: '#4b6b34', roughness: 1, metalness: 0 }),
     )
     ground.rotation.x = -Math.PI / 2
     ground.receiveShadow = true
-    envGroup.add(ground) // drivable ground for the raycast
+    envGroup.add(ground) // drivable surface for the ground-follow raycast
 
-    const grid = new THREE.GridHelper(size, size / 4, '#556', '#333')
-    grid.position.y = 0.02
-    scene.add(grid)
+    // ── Soft dusk lighting ────────────────────────────────────────────────────
+    keyLight.visible = false
+    const sunLight = new THREE.DirectionalLight('#ffd9b0', 2.0)
+    sunLight.position.set(-40, 22, -120) // low, warm, from the horizon
+    sunLight.castShadow = true
+    sunLight.shadow.mapSize.set(2048, 2048)
+    sunLight.shadow.camera.near = 1
+    sunLight.shadow.camera.far = 120
+    sunLight.shadow.camera.left = -20
+    sunLight.shadow.camera.right = 20
+    sunLight.shadow.camera.top = 20
+    sunLight.shadow.camera.bottom = -20
+    sunLight.shadow.bias = -0.0003
+    scene.add(sunLight)
 
-    // An oval loop to drive around
-    const ring = new THREE.Mesh(
-        new THREE.RingGeometry(28, 40, 72),
-        new THREE.MeshStandardMaterial({ color: '#3c3c44', roughness: 0.85, side: THREE.DoubleSide }),
-    )
-    ring.rotation.x = -Math.PI / 2
-    ring.position.y = 0.03
-    ring.receiveShadow = true
-    scene.add(ring)
-
-    // Start/finish stripe
-    const line = new THREE.Mesh(
-        new THREE.PlaneGeometry(14, 2),
-        new THREE.MeshStandardMaterial({ color: '#e6e6e6' }),
-    )
-    line.rotation.x = -Math.PI / 2
-    line.position.set(34, 0.04, 0)
-    scene.add(line)
-
-    // Slalom cones for steering reference
-    const coneGeo = new THREE.ConeGeometry(0.4, 1.2, 12)
-    const coneMat = new THREE.MeshStandardMaterial({ color: '#ff6a00' })
-    for (let i = 0; i < 9; i++) {
-        const cone = new THREE.Mesh(coneGeo, coneMat)
-        cone.position.set(-32 + i * 8, 0.6, 8)
-        cone.castShadow = true
-        scene.add(cone)
-    }
-
-    // Brighten it up so the track reads clearly (vs. the dark garage lighting)
+    ambientLight.color.set('#cfd6e6')
     ambientLight.intensity = 0.7
-    scene.fog = null
+    rimLight.color.set('#ffc79e')
+    rimLight.intensity = 1.1
+    rimLight.position.set(-30, 6, -140)
+    fillLight.color.set('#bcd0e0')
+    fillLight.intensity = 0.35
+
+    scene.background = new THREE.Color('#e9c3a6')
+    scene.fog = new THREE.Fog('#e9c9b4', 90, 520) // soft dusk haze
+
+    camera.far = 3000 // see the sky dome
+    camera.updateProjectionMatrix()
 }
 
 /**
@@ -639,14 +700,68 @@ const keys = {}
 window.addEventListener('keydown', (e) => {
     keys[e.code] = true
     if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault()
+    startEngineSound() // browsers need a user gesture to start audio
 })
 window.addEventListener('keyup', (e) => { keys[e.code] = false })
 
-let carSpeed = 0
+/**
+ * Engine sound — a synthesized engine (Web Audio) whose pitch/volume track the
+ * revs. If you drop a real engine loop at /sounds/engine.mp3 it's used instead,
+ * with its playback rate driven by the revs (swap the placeholder for a BMW).
+ */
+let audioCtx = null
+let engine = null // { master, osc1, osc2, sub, filter } | { el } for a real sample
+const engineFile = new Audio('/sounds/engine.mp3')
+engineFile.loop = true
+let engineFileOk = false
+engineFile.addEventListener('canplaythrough', () => { engineFileOk = true })
+
+function startEngineSound() {
+    if (engine || CONFIG.drive.mute) return
+    if (engineFileOk) {
+        engineFile.volume = 0
+        engineFile.play().catch(() => {})
+        engine = { el: engineFile }
+        return
+    }
+    const Ctx = window.AudioContext || window.webkitAudioContext
+    if (!Ctx) return
+    audioCtx = new Ctx()
+    const master = audioCtx.createGain(); master.gain.value = 0; master.connect(audioCtx.destination)
+    const filter = audioCtx.createBiquadFilter(); filter.type = 'lowpass'; filter.frequency.value = 700; filter.connect(master)
+    const osc1 = audioCtx.createOscillator(); osc1.type = 'sawtooth'; osc1.connect(filter)
+    const osc2 = audioCtx.createOscillator(); osc2.type = 'square'; osc2.detune.value = -8; osc2.connect(filter)
+    const sub = audioCtx.createOscillator(); sub.type = 'sine'; sub.connect(filter)
+    osc1.start(); osc2.start(); sub.start()
+    engine = { master, osc1, osc2, sub, filter }
+}
+
+function updateEngineSound(rev, throttle) {
+    if (!engine || CONFIG.drive.mute) return
+    if (engine.el) {
+        engine.el.playbackRate = 0.7 + rev * 1.8
+        engine.el.volume = Math.min(1, 0.25 + rev * 0.55)
+        return
+    }
+    const t = audioCtx.currentTime
+    const freq = 42 + rev * 165 + (throttle > 0 ? 16 : 0)
+    engine.osc1.frequency.setTargetAtTime(freq, t, 0.04)
+    engine.osc2.frequency.setTargetAtTime(freq * 0.5, t, 0.04)
+    engine.sub.frequency.setTargetAtTime(freq * 0.5, t, 0.04)
+    engine.filter.frequency.setTargetAtTime(500 + rev * 2200, t, 0.05)
+    const vol = 0.05 + rev * 0.16 + (throttle > 0 ? 0.05 : 0)
+    engine.master.gain.setTargetAtTime(vol, t, 0.08)
+}
+
+const speedoEl = document.querySelector('#kmh')
+const speedoBox = document.querySelector('.speedo')
+
+let speedMS = 0         // longitudinal speed in metres/sec (signed)
 let carHeading = 0
-let wheelSign = 1       // flip if the wheels appear to roll backwards
+let wheelSign = -1      // roll direction (flip if the wheels appear to spin backwards)
 let wheelSpin = 0       // accumulated roll angle (around the axle, local X)
 let steerAngle = 0      // smoothed visual steer angle of the front wheels (around up, local Y)
+let chaseSnap = false   // snap (don't lerp) the chase camera on the first frame
 const _qSpin = new THREE.Quaternion()
 const _qSteer = new THREE.Quaternion()
 const _axAxle = new THREE.Vector3(1, 0, 0)
@@ -661,25 +776,32 @@ function enterDrive() {
     if (!currentModel) return
     controls.enabled = false
     controls.autoRotate = false
-    // Always start from the road spot
+    // Always start from the spawn spot
     currentModel.position.copy(carHome.position)
     carHeading = carHome.rotationY
-    carSpeed = 0
-    // Pull in the far plane so the distant city is frustum-culled (fewer draw calls)
-    camera.far = 130
-    camera.updateProjectionMatrix()
+    speedMS = 0
+    chaseSnap = true
+    // Pull in the far plane to frustum-cull the distant CITY (not the open scenes)
+    if (!CONFIG.testTrack.enabled) {
+        camera.far = 130
+        camera.updateProjectionMatrix()
+    }
     if (driveHint) driveHint.classList.add('is-visible')
+    if (speedoBox) speedoBox.classList.add('is-visible')
 }
 
 function exitDrive() {
     controls.enabled = true
-    camera.far = 200
-    camera.updateProjectionMatrix()
+    if (!CONFIG.testTrack.enabled) {
+        camera.far = 200
+        camera.updateProjectionMatrix()
+    }
     if (currentModel) {
         controls.target.copy(currentModel.position)
         controls.update()
     }
     if (driveHint) driveHint.classList.remove('is-visible')
+    if (speedoBox) speedoBox.classList.remove('is-visible')
 }
 
 function updateDrive(dt) {
@@ -689,38 +811,56 @@ function updateDrive(dt) {
     const throttle = (keys.KeyW || keys.ArrowUp) ? 1 : (keys.KeyS || keys.ArrowDown) ? -1 : 0
     const steerIn = (keys.KeyA || keys.ArrowLeft) ? 1 : (keys.KeyD || keys.ArrowRight) ? -1 : 0
 
-    // Longitudinal speed with acceleration + coast-down friction
-    if (throttle !== 0) carSpeed += throttle * d.accel * dt
-    else {
-        const fr = d.friction * dt
-        carSpeed = carSpeed > 0 ? Math.max(0, carSpeed - fr) : Math.min(0, carSpeed + fr)
-    }
-    carSpeed = THREE.MathUtils.clamp(carSpeed, -d.reverseMax, d.maxSpeed)
+    const maxMS = d.maxKmh / 3.6
+    const revMS = d.reverseKmh / 3.6
 
-    // Steering scales with speed; reverses when backing up
-    const speedFactor = THREE.MathUtils.clamp(Math.abs(carSpeed) / d.maxSpeed, 0, 1)
-    carHeading += steerIn * d.steer * dt * speedFactor * Math.sign(carSpeed || 1)
+    // Longitudinal dynamics (m/s). Engine force tapers toward top speed (power +
+    // drag balance), braking is strong, and it coasts down off the throttle.
+    let a
+    if (throttle > 0) a = d.accel * (1 - THREE.MathUtils.clamp(speedMS / maxMS, 0, 1))
+    else if (throttle < 0) {
+        a = speedMS > 0.3 ? -d.brakeDecel
+            : -d.accel * 0.55 * (1 - THREE.MathUtils.clamp(-speedMS / revMS, 0, 1))
+    } else {
+        a = -Math.sign(speedMS) * d.coastDecel
+    }
+    speedMS += a * dt
+    if (throttle === 0 && Math.abs(speedMS) < d.coastDecel * dt) speedMS = 0 // settle to a stop
+    speedMS = THREE.MathUtils.clamp(speedMS, -revMS, maxMS)
+
+    const worldVel = speedMS / metersPerUnit // world units / sec
+
+    // Steering: ease the front wheels to their target angle, then turn the car
+    // with a bicycle model (turn radius = wheelbase / tan(steer); yaw ∝ speed).
+    const steerTarget = steerIn * THREE.MathUtils.degToRad(d.maxSteerDeg)
+    steerAngle = THREE.MathUtils.lerp(steerAngle, steerTarget, 1 - Math.pow(0.0009, dt))
+    carHeading += (worldVel / wheelbaseWorld) * Math.tan(steerAngle) * dt
 
     // Move along heading
     const dir = new THREE.Vector3(Math.sin(carHeading), 0, Math.cos(carHeading))
-    currentModel.position.addScaledVector(dir, carSpeed * dt)
+    currentModel.position.addScaledVector(dir, worldVel * dt)
     currentModel.rotation.y = carHeading + THREE.MathUtils.degToRad(d.headingOffset)
 
     // Wheels: rear pair rolls; front pair rolls AND steers.
     if (wheels.length) {
-        wheelSpin += ((carSpeed * dt) / wheelRadius) * wheelSign
-        // Smoothly ease the visual steer toward the input (max ~28°)
-        const steerTarget = steerIn * THREE.MathUtils.degToRad(28)
-        steerAngle = THREE.MathUtils.lerp(steerAngle, steerTarget, 0.2)
+        wheelSpin += ((worldVel * dt) / wheelRadius) * wheelSign
         _qSpin.setFromAxisAngle(_axAxle, wheelSpin)     // roll, around the axle (local X)
-        _qSteer.setFromAxisAngle(_axUp, steerAngle)     // steer, around the car's vertical
         for (const w of wheels) {
-            // steer in PARENT (car) space (pre-multiply) → pivots like a real kingpin;
-            // spin in LOCAL axle space (post-multiply) → rolls on the steered axle.
-            if (w.userData.front) w.quaternion.copy(_qSteer).multiply(w.userData.base).multiply(_qSpin)
-            else w.quaternion.copy(w.userData.base).multiply(_qSpin)
+            if (w.userData.front) {
+                // steer around the wheel's true vertical (pre-multiply) → flat kingpin
+                // pivot; spin around the axle (post-multiply) → rolls on the steered axle.
+                _qSteer.setFromAxisAngle(w.userData.steerAxis, steerAngle)
+                w.quaternion.copy(_qSteer).multiply(w.userData.base).multiply(_qSpin)
+            } else {
+                w.quaternion.copy(w.userData.base).multiply(_qSpin)
+            }
         }
     }
+
+    // HUD + engine sound
+    const rev = THREE.MathUtils.clamp(Math.abs(speedMS) / maxMS, 0, 1)
+    if (speedoEl) speedoEl.textContent = Math.round(Math.abs(speedMS) * 3.6)
+    updateEngineSound(rev, throttle)
 
     // Stick to the road surface (throttled raycast → smoothed). Cast a short ray
     // starting just above the car so it locks to the road it's on, not overpass
@@ -738,25 +878,30 @@ function updateDrive(dt) {
         }
     }
 
-    // Chase camera — follows the car holding the rear-3/4 "hero" angle. The
-    // offset tracks the car's body rotation (heading + headingOffset).
-    const camAz = THREE.MathUtils.degToRad(d.camAzimuth + d.headingOffset) + carHeading
-    const camEl = THREE.MathUtils.degToRad(d.camElevation)
-    const r = d.camDistance
+    // Chase camera — holds the SAME framing as the default hero angle, so drive
+    // mode doesn't jump the camera; it just tracks the car's body rotation.
+    const cam = CONFIG.camera
+    const camAz = THREE.MathUtils.degToRad(cam.heroAzimuth + d.headingOffset) + carHeading
+    const camEl = THREE.MathUtils.degToRad(cam.heroElevation)
+    const r = carFitDist * cam.heroDistance
+    const yBump = carSizeY * 0.1
     const desired = currentModel.position.clone().add(new THREE.Vector3(
         r * Math.cos(camEl) * Math.sin(camAz),
-        r * Math.sin(camEl) + 0.4,
+        r * Math.sin(camEl) + yBump,
         r * Math.cos(camEl) * Math.cos(camAz),
     ))
-    camera.position.lerp(desired, 1 - Math.pow(0.0015, dt))
-    camera.lookAt(currentModel.position.x, currentModel.position.y + 0.6, currentModel.position.z)
+    if (chaseSnap) { camera.position.copy(desired); chaseSnap = false }
+    else camera.position.lerp(desired, 1 - Math.pow(0.0015, dt))
+    camera.lookAt(currentModel.position.x, currentModel.position.y + yBump, currentModel.position.z)
 }
 
 const driveFolder = gui.addFolder('Drive (WASD)')
 driveFolder.add(CONFIG.drive, 'enabled').name('Drive mode').onChange((v) => (v ? enterDrive() : exitDrive()))
-driveFolder.add(CONFIG.drive, 'maxSpeed', 2, 30, 0.5).name('Top speed')
-driveFolder.add(CONFIG.drive, 'steer', 0.5, 4, 0.1).name('Steering')
+driveFolder.add(CONFIG.drive, 'maxKmh', 60, 320, 5).name('Top speed (km/h)')
+driveFolder.add(CONFIG.drive, 'accel', 3, 16, 0.5).name('Acceleration')
+driveFolder.add(CONFIG.drive, 'maxSteerDeg', 15, 45, 1).name('Steering lock')
 driveFolder.add(CONFIG.drive, 'groundFollow').name('Follow road')
+driveFolder.add(CONFIG.drive, 'mute').name('Mute engine')
 driveFolder.add(CONFIG.drive, 'headingOffset', -180, 180, 90).name('Nose align')
 
 /**
@@ -778,6 +923,13 @@ const tick = () => {
 
     if (CONFIG.drive.enabled) updateDrive(deltaTime)
     else controls.update()
+
+    // Animate the sky (clouds drift) and grass (wind + reacts to the car)
+    if (skyMaterial) skyMaterial.uniforms.uTime.value = elapsedTime
+    if (grassMaterial) {
+        grassMaterial.uniforms.uTime.value = elapsedTime
+        if (currentModel) grassMaterial.uniforms.uCarPos.value.copy(currentModel.position)
+    }
 
     if (CONFIG.cinematic.enabled) {
         composer.render()
