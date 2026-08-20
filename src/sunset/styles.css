@@ -50,7 +50,7 @@ canvas { display: block; outline: none; }
     background: radial-gradient(ellipse at center, rgba(10, 30, 22, 0.2), rgba(10, 20, 18, 0.55));
 }
 .sunset-title h1 {
-    font-size: 58px; line-height: 1.25; letter-spacing: 0.04em;
+    font-size: clamp(30px, 7vw, 56px); line-height: 1.25; letter-spacing: 0.02em;
     color: #eef6ea; text-shadow: 0 4px 0 #1f5c4a, 0 0 24px rgba(143, 224, 189, 0.5);
     margin-bottom: 20px;
 }
@@ -63,7 +63,34 @@ canvas { display: block; outline: none; }
 }
 .sunset-start:active { transform: translateY(3px); box-shadow: 0 1px 0 #4f9c7e; }
 @keyframes sunset-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.72; } }
+.sunset-lobby {
+    display: flex; align-items: center; gap: 16px; margin-bottom: 32px;
+    font-size: 9px; letter-spacing: 0.06em; color: #cfe6da;
+}
+.sunset-lobby b { color: #8fe0bd; }
+.sunset-lobby .is-ready { color: #8fe0bd; }
+.sunset-share {
+    font-family: 'Press Start 2P', monospace; font-size: 9px; color: #0e1f18;
+    background: #cfe6da; border: none; border-radius: 3px; padding: 8px 10px; cursor: pointer;
+}
 .sunset-controls { font-size: 9px; opacity: 0.75; margin-top: 40px; letter-spacing: 0.03em; }
+
+/* Rival gap (top-centre) */
+.sunset-gap {
+    position: absolute; top: 26px; left: 50%; transform: translateX(-50%);
+    font-family: 'Press Start 2P', monospace; font-size: 11px; color: #ffe08a;
+    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.4);
+}
+
+/* Boost meter (above the speedo) */
+.sunset-boost {
+    position: absolute; right: 40px; bottom: 92px; width: 200px; height: 8px;
+    background: rgba(255, 255, 255, 0.15); border-radius: 4px; overflow: hidden;
+}
+.sunset-boost i {
+    display: block; width: 100%; height: 100%; border-radius: 4px; transform-origin: left;
+    background: linear-gradient(90deg, #8fe0bd, #4fd8a0);
+}
 .sunset-controls b { color: #8fe0bd; }
 .sunset-best-title { font-size: 10px; color: #ffe08a; margin-top: 16px; letter-spacing: 0.08em; }
 

@@ -7,21 +7,30 @@ import { useKeyboard } from '../game/input.js'
 import { drive } from './hudState.js'
 import { session } from './session.js'
 import { startAudio, toggleMute } from './audio.js'
+import { net, connect, ensureRoom, onRoster, rivalCount } from './net.js'
 
 const km = (m) => `${(m / 1000).toFixed(1)} km`
+const NAME = 'RACER ' + Math.random().toString(36).slice(2, 5).toUpperCase()
 
 /**
- * Endless sunset cruise — its own self-contained page. A title screen, the
- * kinematic drive scene, a speed/distance HUD, and steer-only controls.
+ * Sunset Boulevard — endless multiplayer cruise. Connects to a PartyKit room on
+ * load (room code lives in the URL, so the link is shareable), shows a lobby on
+ * the title screen, then a HUD with speed, boost and the rival gap.
  */
 export function SunsetApp() {
     const [phase, setPhase] = useState('title')
-    useKeyboard() // global key listeners for steering/camera/paint
+    useKeyboard()
+
+    // Join the room straight away so the lobby shows who's here.
+    useEffect(() => {
+        net.name = NAME
+        connect(ensureRoom())
+    }, [])
 
     const begin = () => {
         if (session.started) return
         session.started = true
-        startAudio()          // must be from a user gesture
+        startAudio()
         setPhase('driving')
     }
 
@@ -54,13 +63,31 @@ export function SunsetApp() {
 }
 
 function Title({ onStart }) {
+    const [rivals, setRivals] = useState(0)
+    const [copied, setCopied] = useState(false)
+    useEffect(() => onRoster(() => setRivals(rivalCount())), [])
+
+    const share = () => {
+        navigator.clipboard?.writeText(window.location.href)
+        setCopied(true); setTimeout(() => setCopied(false), 1500)
+    }
+
     return (
         <div className="sunset-title">
-            <h1>SUNSET<br />DRIVE</h1>
+            <h1>SUNSET<br />BOULEVARD</h1>
             <p className="sunset-sub">driving into the sunset</p>
+
+            <div className="sunset-lobby">
+                <span>ROOM <b>{net.room}</b></span>
+                <button className="sunset-share" onClick={share}>{copied ? 'LINK COPIED' : 'SHARE LINK'}</button>
+                <span className={rivals ? 'is-ready' : ''}>
+                    {rivals ? `RIVAL CONNECTED (${rivals})` : 'WAITING FOR RIVAL…'}
+                </span>
+            </div>
+
             <button className="sunset-start" onClick={onStart}>PRESS TO DRIVE</button>
             <p className="sunset-controls">
-                <b>A</b> <b>D</b> STEER &middot; <b>V</b> CAMERA &middot; <b>C</b> PAINT &middot; <b>M</b> MUTE
+                <b>A</b> <b>D</b> STEER &middot; <b>SHIFT</b> BOOST &middot; <b>V</b> CAM &middot; <b>C</b> PAINT &middot; <b>M</b> MUTE
             </p>
             {session.best > 0 && <p className="sunset-best-title">BEST {km(session.best)}</p>}
         </div>
@@ -74,6 +101,8 @@ function Hud() {
     const dist = useRef(null)
     const best = useRef(null)
     const record = useRef(null)
+    const boost = useRef(null)
+    const gap = useRef(null)
     useEffect(() => {
         let raf
         const loop = () => {
@@ -83,6 +112,12 @@ function Hud() {
             if (dist.current) dist.current.textContent = km(session.distance)
             if (best.current) best.current.textContent = km(session.best)
             if (record.current) record.current.style.opacity = session.newBest ? '1' : '0'
+            if (boost.current) boost.current.style.transform = `scaleX(${drive.boost})`
+            if (gap.current) {
+                if (drive.gap == null) gap.current.textContent = ''
+                else if (drive.gap >= 0) gap.current.textContent = `RIVAL AHEAD ${drive.gap} m`
+                else gap.current.textContent = `RIVAL BEHIND ${-drive.gap} m`
+            }
             raf = requestAnimationFrame(loop)
         }
         raf = requestAnimationFrame(loop)
@@ -95,9 +130,11 @@ function Hud() {
                 <small>BEST <b ref={best}>0.0 km</b></small>
                 <em ref={record}>NEW RECORD</em>
             </div>
+            <div className="sunset-gap" ref={gap} />
             <div className="sunset-cam">CAM <b ref={cam}>CHASE</b> &middot; PAINT <b ref={paint}>BLUE</b></div>
+            <div className="sunset-boost"><i ref={boost} /></div>
             <div className="sunset-speed"><b ref={kmh}>0</b><span>km/h</span></div>
-            <div className="sunset-hint"><b>A</b> <b>D</b> STEER &middot; <b>V</b> CAMERA &middot; <b>C</b> PAINT</div>
+            <div className="sunset-hint"><b>A</b> <b>D</b> STEER &middot; <b>SHIFT</b> BOOST &middot; <b>V</b> CAM &middot; <b>C</b> PAINT</div>
         </div>
     )
 }

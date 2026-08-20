@@ -12,6 +12,8 @@ import { ps1CarModel, ps1Material } from './ps1.js'
 import { carHue, PAINTS } from './paint.js'
 import { session, bumpDistance } from './session.js'
 import { updateAudio } from './audio.js'
+import { net, sendState } from './net.js'
+import { Ghosts } from './Ghosts.jsx'
 
 /**
  * Endless sunset cruise — a kinematic arcade drive (no physics). The car sits at
@@ -25,6 +27,7 @@ const MAX_X = ROAD_W / 2 - 1.4
 const BACK = -60             // recycle window (behind camera)
 const FWD = 900              // recycle window (ahead)
 const CRUISE = 74            // top cruise speed (m/s ≈ 266 km/h)
+const BOOST_SPEED = 96       // ~345 km/h while boosting
 const LAT_SPEED = 22         // lateral m/s
 const DASH_PITCH = 16
 const POST_PITCH = 34
@@ -81,15 +84,18 @@ export function SunsetScene() {
     }), [postN])
 
     const dummy = useMemo(() => new THREE.Object3D(), [])
-    const state = useRef({ carX: 0, speed: 0, spin: 0, camX: 0, cam: 0, prevV: false, paint: 0, prevC: false })
+    const state = useRef({ carX: 0, speed: 0, spin: 0, camX: 0, cam: 0, prevV: false, paint: 0, prevC: false, boost: 100, netT: 0 })
 
     useFrame((_, delta) => {
         const dt = Math.min(delta, 0.05)
         const s = state.current
 
-        // Ease up to cruise speed once the run has started (0 on the title screen).
-        const target = session.started ? CRUISE : 0
-        s.speed += (target - s.speed) * Math.min(1, dt * 0.5)
+        // Cruise, with a boost (Shift) — the bit of skill that lets you pull
+        // ahead of a rival. Meter drains while held, refills otherwise.
+        const boosting = session.started && (keys.ShiftLeft || keys.ShiftRight) && s.boost > 0
+        const target = session.started ? (boosting ? BOOST_SPEED : CRUISE) : 0
+        s.speed += (target - s.speed) * Math.min(1, dt * (boosting ? 1.2 : 0.5))
+        s.boost = boosting ? Math.max(0, s.boost - 34 * dt) : Math.min(100, s.boost + 14 * dt)
 
         // Steer-only: A/← left, D/→ right. Camera looks down +z, so screen-left
         // is world +x — steer left (+1) must increase carX.
@@ -141,11 +147,22 @@ export function SunsetScene() {
         s.prevC = !!keys.KeyC
 
         if (session.started) bumpDistance(Math.abs(s.speed) * dt)
-        updateAudio(Math.min(1, s.speed / CRUISE))
+        updateAudio(Math.min(1, s.speed / CRUISE), boosting)
+
+        // Broadcast our state ~15 Hz and read the rival gap.
+        s.netT += dt
+        if (s.netT > 0.066) {
+            s.netT = 0
+            sendState({ name: net.name, dist: session.distance, x: s.carX, hue: carHue.value, kmh: drive.kmh, boosting })
+        }
+        let gap = null
+        for (const id in net.players) { if (id !== net.id) { gap = Math.round(net.players[id].dist - session.distance); break } }
 
         drive.kmh = Math.round(s.speed * 3.6)
         drive.cam = C.name
         drive.paint = PAINTS[s.paint].name
+        drive.boost = s.boost / 100
+        drive.gap = gap
     })
 
     return (
@@ -174,6 +191,8 @@ export function SunsetScene() {
             <group ref={carRef}>
                 <primitive object={carRoot} />
             </group>
+
+            <Ghosts />
 
             <Retro />
         </>
