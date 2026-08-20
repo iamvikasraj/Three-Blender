@@ -11,7 +11,7 @@ import { Retro } from './Retro.jsx'
 import { ps1CarModel, ps1Material } from './ps1.js'
 import { carHue, PAINTS } from './paint.js'
 import { session, bumpDistance } from './session.js'
-import { updateAudio } from './audio.js'
+import { musicState, updateAudio } from './audio.js'
 import { net, sendState } from './net.js'
 import { Ghosts } from './Ghosts.jsx'
 
@@ -26,9 +26,11 @@ const ROAD_W = 22            // asphalt width (m)
 const MAX_X = ROAD_W / 2 - 1.4
 const BACK = -60             // recycle window (behind camera)
 const FWD = 900              // recycle window (ahead)
-const CRUISE = 74            // top cruise speed (m/s ≈ 266 km/h)
-const BOOST_SPEED = 96       // ~345 km/h while boosting
-const LAT_SPEED = 22         // lateral m/s
+const CRUISE = 42            // top cruise speed (m/s ≈ 151 km/h)
+const BOOST_SPEED = 58       // ~209 km/h while boosting
+const LAT_SPEED = 10         // lateral m/s
+const LAT_RESPONSE = 5.5
+const LAT_DRAG = 3.5
 const DASH_PITCH = 16
 const POST_PITCH = 34
 
@@ -39,8 +41,8 @@ const POST_PITCH = 34
  *  lookXMul how much the aim point leans with the car
  */
 const CAMS = [
-    { name: 'CHASE',  lag: 0.6, follow: 3,  height: 3.4,  back: -9.5, lookXMul: 0.4, lookY: 1.6,  lookZ: 40, fov: 68 },
-    { name: 'NEAR',   lag: 0.7, follow: 4,  height: 2.2,  back: -5.2, lookXMul: 0.5, lookY: 1.2,  lookZ: 40, fov: 74 },
+    { name: 'CHASE',  lag: 0.6, follow: 3,  height: 2.8,  back: -7.2, lookXMul: 0.4, lookY: 1.35, lookZ: 32, fov: 64 },
+    { name: 'NEAR',   lag: 0.7, follow: 4,  height: 1.9,  back: -4.2, lookXMul: 0.5, lookY: 1.1,  lookZ: 30, fov: 70 },
     { name: 'BONNET', lag: 1.0, follow: 12, height: 1.05, back: 2.2,  lookXMul: 1.0, lookY: 1.15, lookZ: 60, fov: 82 },
 ]
 
@@ -84,7 +86,7 @@ export function SunsetScene() {
     }), [postN])
 
     const dummy = useMemo(() => new THREE.Object3D(), [])
-    const state = useRef({ carX: 0, speed: 0, spin: 0, camX: 0, cam: 0, prevV: false, paint: 0, prevC: false, boost: 100, netT: 0 })
+    const state = useRef({ carX: 0, lateralSpeed: 0, speed: 0, spin: 0, camX: 0, cam: 0, prevV: false, paint: 0, prevC: false, boost: 100, netT: 0 })
 
     useFrame((_, delta) => {
         const dt = Math.min(delta, 0.05)
@@ -94,19 +96,23 @@ export function SunsetScene() {
         // ahead of a rival. Meter drains while held, refills otherwise.
         const boosting = session.started && (keys.ShiftLeft || keys.ShiftRight) && s.boost > 0
         const target = session.started ? (boosting ? BOOST_SPEED : CRUISE) : 0
-        s.speed += (target - s.speed) * Math.min(1, dt * (boosting ? 1.2 : 0.5))
+        s.speed += (target - s.speed) * Math.min(1, dt * (boosting ? 1 : 0.4))
         s.boost = boosting ? Math.max(0, s.boost - 34 * dt) : Math.min(100, s.boost + 14 * dt)
 
         // Steer-only: A/← left, D/→ right. Camera looks down +z, so screen-left
         // is world +x — steer left (+1) must increase carX.
         const steer = ((keys.KeyA || keys.ArrowLeft) ? 1 : 0) - ((keys.KeyD || keys.ArrowRight) ? 1 : 0)
-        s.carX = THREE.MathUtils.clamp(s.carX + steer * LAT_SPEED * dt, -MAX_X, MAX_X)
+        const steeringLimit = LAT_SPEED * (1 - Math.min(0.35, s.speed / BOOST_SPEED * 0.35))
+        const lateralTarget = steer * steeringLimit
+        s.lateralSpeed = THREE.MathUtils.damp(s.lateralSpeed, lateralTarget, steer ? LAT_RESPONSE : LAT_DRAG, dt)
+        s.carX = THREE.MathUtils.clamp(s.carX + s.lateralSpeed * dt, -MAX_X, MAX_X)
+        if (Math.abs(s.carX) >= MAX_X) s.lateralSpeed = 0
 
         // Car transform: slide + a little lean/yaw into the steer.
         if (carRef.current) {
             carRef.current.position.set(s.carX, 0, 0)
-            carRef.current.rotation.z = -steer * 0.12
-            carRef.current.rotation.y = steer * 0.09
+            carRef.current.rotation.z = THREE.MathUtils.damp(carRef.current.rotation.z, -s.lateralSpeed / LAT_SPEED * 0.12, 7, dt)
+            carRef.current.rotation.y = THREE.MathUtils.damp(carRef.current.rotation.y, s.lateralSpeed / LAT_SPEED * 0.09, 7, dt)
         }
         s.spin += (s.speed / 0.34) * dt
         const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), s.spin)
@@ -137,9 +143,11 @@ export function SunsetScene() {
         if (keys.KeyV && !s.prevV) s.cam = (s.cam + 1) % CAMS.length
         s.prevV = !!keys.KeyV
         const C = CAMS[s.cam]
+        const songProgress = musicState.progress
         s.camX += (s.carX * C.lag - s.camX) * Math.min(1, dt * C.follow)
-        camera.position.set(s.camX, C.height, C.back)
-        camera.lookAt(s.carX * C.lookXMul, C.lookY, C.lookZ)
+        const sunsetZ = C.back + songProgress * 35
+        camera.position.set(s.camX, C.height - songProgress * 0.8, sunsetZ)
+        camera.lookAt(s.carX * C.lookXMul, C.lookY - songProgress * 0.18, C.lookZ + songProgress * 100)
         if (camera.fov !== C.fov) { camera.fov = C.fov; camera.updateProjectionMatrix() }
 
         // Paint toggle on C (edge-detected): re-hue the whole car.
@@ -167,28 +175,29 @@ export function SunsetScene() {
 
     return (
         <>
-            <Environment preset="sunset" />
+            <Environment preset="synthwave" />
 
             {/* Ground apron + asphalt + solid edge lines (static; motion comes from the props) */}
             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.06, 700]} receiveShadow>
                 <planeGeometry args={[800, 1800]} />
-                <meshStandardMaterial color="#356b32" roughness={1} />
+                <meshStandardMaterial color="#344c70" roughness={1} />
             </mesh>
             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 700]} receiveShadow>
                 <planeGeometry args={[ROAD_W, 1800]} />
-                <meshStandardMaterial color="#22352b" roughness={0.92} />
+                <meshStandardMaterial color="#34364d" roughness={0.92} />
             </mesh>
             {[-1, 1].map((sgn) => (
                 <mesh key={sgn} rotation={[-Math.PI / 2, 0, 0]} position={[sgn * (ROAD_W / 2 - 0.5), 0.01, 700]}>
                     <planeGeometry args={[0.3, 1800]} />
-                    <meshBasicMaterial color="#e6f2d8" />
+                    <meshBasicMaterial color="#ffb35e" />
                 </mesh>
             ))}
-
             <instancedMesh ref={dashRef} args={[dashGeo, dashMat, dashN]} frustumCulled={false} />
             <instancedMesh ref={postRef} args={[postGeo, postMat, postN]} frustumCulled={false} />
 
             <group ref={carRef}>
+                <pointLight position={[-2.8, 2.8, -4]} color="#ffd0a0" intensity={8} distance={18} decay={2} />
+                <pointLight position={[2.5, 2, 2.5]} color="#8edbff" intensity={5} distance={15} decay={2} />
                 <primitive object={carRoot} />
             </group>
 
