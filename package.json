@@ -9,13 +9,21 @@
   },
   "devDependencies": {
     "@gltf-transform/cli": "^4.4.2",
+    "@vitejs/plugin-react": "^4.7.0",
     "vite": "^6.2.2",
     "vite-plugin-restart": "^0.4.2"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.20.0",
+    "@react-three/drei": "^10.7.8",
+    "@react-three/fiber": "^9.7.0",
+    "@react-three/postprocessing": "^3.0.5",
+    "@react-three/rapier": "^2.2.0",
+    "leva": "^0.10.1",
     "lil-gui": "^0.20.0",
-    "three": "^0.174.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "three": "^0.182.0",
     "three-mesh-bvh": "^0.7.8"
   }
 }

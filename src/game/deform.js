@@ -1,15 +1,11 @@
 import * as THREE from 'three'
 
 /**
- * Mesh-deformation placeholder — CPU vertex crumpling.
- * On impact, vertices near the impact point are pushed toward the car's core
- * with a smooth falloff, so panels visibly dent. Each mesh accumulates dents
- * up to MAX_DENT so repeated crashes don't implode the model.
- *
- * ── KEY TUNABLES ────────────────────────────────────────────────────────────
- *  radius    dent size in metres
- *  strength  how deep a single impact pushes (m)
- *  MAX_DENT  cumulative cap per vertex (m)
+ * Mesh-deformation placeholder — CPU vertex crumpling. On impact, vertices near
+ * the impact point are pushed toward the car's core with a smooth falloff, so
+ * panels visibly dent. Each mesh accumulates dents up to MAX_DENT so repeated
+ * crashes don't implode the model. (Pure three.js — unchanged from the vanilla
+ * build.)
  */
 const MAX_DENT = 0.22
 
@@ -23,12 +19,10 @@ export function dent(root, worldPoint, radius = 0.6, strength = 0.12) {
         const geo = mesh.geometry
         const pos = geo.attributes.position
 
-        // Impact point and "core" (origin of the car) in this mesh's local space
         _local.copy(worldPoint)
         mesh.worldToLocal(_local)
-        _dir.set(0, 0.3, 0).sub(_local).normalize() // push direction: toward the core
+        _dir.set(0, 0.3, 0).sub(_local).normalize()
 
-        // Per-mesh accumulated dent budget
         if (mesh.userData.dented === undefined) mesh.userData.dented = 0
         if (mesh.userData.dented >= MAX_DENT) return
 
@@ -43,7 +37,7 @@ export function dent(root, worldPoint, radius = 0.6, strength = 0.12) {
             const dz = pos.getZ(i) - _local.z
             const d = Math.sqrt(dx * dx + dy * dy + dz * dz)
             if (d > localRadius) continue
-            const falloff = 1 - d / localRadius // 1 at impact center → 0 at edge
+            const falloff = 1 - d / localRadius
             const push = localStrength * falloff * falloff
             pos.setXYZ(i,
                 pos.getX(i) + _dir.x * push,

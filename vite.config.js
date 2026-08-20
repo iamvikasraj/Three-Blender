@@ -1,3 +1,4 @@
+import react from '@vitejs/plugin-react'
 import restart from 'vite-plugin-restart'
 import { resolve, dirname } from 'path'
 import { fileURLToPath } from 'url'
@@ -10,6 +11,7 @@ export default {
     server:
     {
         host: true, // Open to local network and display URL
+        port: process.env.PORT ? Number(process.env.PORT) : 5173,
         open: !('SANDBOX_URL' in process.env || 'CODESANDBOX_HOST' in process.env) // Open if it's not a CodeSandbox
     },
     build:
@@ -21,13 +23,14 @@ export default {
         {
             input:
             {
-                main: resolve(projectRoot, 'src/index.html'),      // NFS menu / sunset drive
-                burnout: resolve(projectRoot, 'src/burnout.html'), // Burnout-style prototype
+                main: resolve(projectRoot, 'src/index.html'),      // NFS menu / sunset drive (vanilla)
+                burnout: resolve(projectRoot, 'src/burnout.html'), // Burnout-style prototype (React Three Fiber)
             },
         },
     },
     plugins:
     [
+        react(),
         restart({ restart: [ '../static/**', ] }) // Restart server on static file change
     ],
 }

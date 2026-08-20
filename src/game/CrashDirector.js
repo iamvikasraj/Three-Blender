@@ -1,25 +1,25 @@
 import * as THREE from 'three'
-import { world, RAPIER, time } from './physics.js'
+import { timeState } from './raceState.js'
+import { telemetry } from './telemetry.js'
 
 /**
  * Crash director — time dilation, cinematic orbit hand-off, particles,
- * aftertouch, and respawn.
- *
- * ── KEY TUNABLES ────────────────────────────────────────────────────────────
- *  SLOWMO        physics time scale during a crash (0.22 = heavy slow-mo)
- *  DURATION      crash state length in REAL seconds
- *  AFTERTOUCH    torque impulse per second from steering while tumbling
+ * aftertouch and respawn. Ported from crash.js; the only substitutions are the
+ * injected Rapier world/instance (from useRapier) in place of the module
+ * globals, timeState for the shared time scale, and telemetry.crashed driving
+ * the CRASHED banner instead of a DOM class.
  */
 const SLOWMO = 0.22
 const DURATION = 3.2
 const AFTERTOUCH = 900
 
 export class CrashDirector {
-    constructor(scene, vehicle, chaseCam, banner) {
+    constructor({ scene, world, rapier, vehicle, chase }) {
         this.scene = scene
+        this.world = world
+        this.RAPIER = rapier
         this.vehicle = vehicle
-        this.cam = chaseCam
-        this.banner = banner
+        this.cam = chase
         this.active = false
         this.timer = 0
         this.safe = { pos: new THREE.Vector3(-2.2, 1.2, 0), heading: 0 }
@@ -29,7 +29,6 @@ export class CrashDirector {
     }
 
     buildParticles() {
-        // Sparks
         this.sparkCount = 220
         this.sparkVel = []
         this.sparkLife = new Float32Array(this.sparkCount)
@@ -45,7 +44,6 @@ export class CrashDirector {
         this.scene.add(this.sparks)
         for (let i = 0; i < this.sparkCount; i++) this.sparkVel.push(new THREE.Vector3())
 
-        // Smoke
         this.smokeCount = 40
         this.smokeVel = []
         this.smokeLife = new Float32Array(this.smokeCount)
@@ -62,7 +60,6 @@ export class CrashDirector {
         for (let i = 0; i < this.smokeCount; i++) this.smokeVel.push(new THREE.Vector3())
     }
 
-    /** Record a "safe" pose to respawn at (called while driving normally). */
     recordSafe(dt) {
         if (this.active) return
         this.safeTick += dt
@@ -72,25 +69,23 @@ export class CrashDirector {
         if (Math.abs(v.speed) > 4) {
             const p = v.position()
             const f = v.forward()
-            if (Math.abs(p.x) < 10.5) { // only if we're on the road
+            if (Math.abs(p.x) < 10.5) {
                 this.safe.pos.set(p.x, p.y + 0.3, p.z)
                 this.safe.heading = Math.atan2(f.x, f.z)
             }
         }
     }
 
-    /** Enter the crash state: slow-mo + orbit cam + particles + free tumble. */
     trigger(impactPoint) {
         if (this.active) return
         this.active = true
         this.timer = 0
-        time.scale = SLOWMO
+        timeState.scale = SLOWMO
         this.vehicle.controlEnabled = false
         this.cam.mode = 'crash'
         this.cam.orbitAngle = Math.random() * Math.PI * 2
-        this.banner?.classList.add('is-visible')
+        telemetry.crashed = true
 
-        // Send the car tumbling
         const b = this.vehicle.body
         b.applyImpulse({ x: (Math.random() - 0.5) * 2600, y: 3400, z: -Math.sign(this.vehicle.speed || 1) * 1600 }, true)
         b.applyTorqueImpulse({
@@ -103,7 +98,6 @@ export class CrashDirector {
         this.spawnDebris(impactPoint ?? this.vehicle.position())
     }
 
-    /** Light feedback for a wall scrape: sparks only, no crash state. */
     sparksAt(at) {
         this.sparks.visible = true
         const pos = this.sparkGeo.attributes.position.array
@@ -147,6 +141,7 @@ export class CrashDirector {
     }
 
     spawnDebris(at) {
+        const RAPIER = this.RAPIER
         for (let i = 0; i < 10; i++) {
             const size = 0.08 + Math.random() * 0.14
             const mesh = new THREE.Mesh(
@@ -154,10 +149,10 @@ export class CrashDirector {
                 new THREE.MeshStandardMaterial({ color: i % 2 ? '#3a3f4a' : '#c8ccd4', roughness: 0.5, metalness: 0.7 }),
             )
             this.scene.add(mesh)
-            const body = world.createRigidBody(
+            const body = this.world.createRigidBody(
                 RAPIER.RigidBodyDesc.dynamic().setTranslation(at.x, at.y + 0.6, at.z),
             )
-            world.createCollider(RAPIER.ColliderDesc.cuboid(size / 2, size / 2, size / 2).setMass(2).setRestitution(0.4), body)
+            this.world.createCollider(RAPIER.ColliderDesc.cuboid(size / 2, size / 2, size / 2).setMass(2).setRestitution(0.4), body)
             body.applyImpulse({
                 x: (Math.random() - 0.5) * 16,
                 y: Math.random() * 14,
@@ -168,7 +163,6 @@ export class CrashDirector {
         }
     }
 
-    /** Aftertouch: nudge the tumbling wreck with the steering keys. */
     aftertouch(steer, pitch, dt) {
         if (!this.active) return
         const b = this.vehicle.body
@@ -176,7 +170,6 @@ export class CrashDirector {
     }
 
     update(dt) {
-        // Particles tick (in real time, so slow-mo doesn't freeze them)
         if (this.sparks.visible) {
             const pos = this.sparkGeo.attributes.position.array
             let alive = false
@@ -206,7 +199,6 @@ export class CrashDirector {
             if (!alive) this.smoke.visible = false
         }
 
-        // Debris cleanup
         const now = performance.now() / 1000
         this.debris = this.debris.filter((d) => {
             const p = d.body.translation()
@@ -215,7 +207,9 @@ export class CrashDirector {
             d.mesh.quaternion.set(r.x, r.y, r.z, r.w)
             if (now - d.born > 5) {
                 this.scene.remove(d.mesh)
-                world.removeRigidBody(d.body)
+                d.mesh.geometry.dispose()
+                d.mesh.material.dispose()
+                this.world.removeRigidBody(d.body)
                 return false
             }
             return true
@@ -228,7 +222,7 @@ export class CrashDirector {
 
     respawn() {
         this.active = false
-        time.scale = 1
+        timeState.scale = 1
         const b = this.vehicle.body
         b.setTranslation({ x: this.safe.pos.x, y: this.safe.pos.y, z: this.safe.pos.z }, true)
         const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), this.safe.heading)
@@ -239,6 +233,18 @@ export class CrashDirector {
         this.vehicle.boostMeter = Math.max(this.vehicle.boostMeter, 40)
         this.cam.mode = 'chase'
         this.cam.snap = true
-        this.banner?.classList.remove('is-visible')
+        telemetry.crashed = false
+    }
+
+    dispose() {
+        this.scene.remove(this.sparks, this.smoke)
+        this.sparkGeo.dispose(); this.sparks.material.dispose()
+        this.smokeGeo.dispose(); this.smokeMat.dispose()
+        for (const d of this.debris) {
+            this.scene.remove(d.mesh)
+            d.mesh.geometry.dispose(); d.mesh.material.dispose()
+            try { this.world.removeRigidBody(d.body) } catch { /* gone */ }
+        }
+        this.debris = []
     }
 }
