@@ -41,9 +41,9 @@ function Sunset() {
         fog: false,
         depthWrite: false,
         uniforms: {
-            uTop: { value: new THREE.Color('#6e2170') },
-            uMid: { value: new THREE.Color('#e0518e') },
-            uHorizon: { value: new THREE.Color('#ffb46a') },
+            uTop: { value: new THREE.Color('#14867a') },     // deep teal zenith
+            uMid: { value: new THREE.Color('#4fb89e') },     // teal-green
+            uHorizon: { value: new THREE.Color('#dcecc6') }, // pale mint at the horizon
         },
         vertexShader: /* glsl */`
             varying vec3 vDir;
@@ -62,22 +62,22 @@ function Sunset() {
 
     return (
         <>
-            <fog attach="fog" args={['#b0487e', 70, 460]} />
+            <fog attach="fog" args={['#bfe0c2', 70, 480]} />
             <mesh material={skyMat}>
                 <sphereGeometry args={[1600, 32, 16]} />
             </mesh>
-            <mesh position={[120, 95, 1500]} onUpdate={(m) => m.lookAt(0, 40, 0)}>
+            <mesh position={[0, 95, 1500]} onUpdate={(m) => m.lookAt(0, 40, 0)}>
                 <circleGeometry args={[150, 64]} />
-                <meshBasicMaterial color="#fff3b0" fog={false} />
+                <meshBasicMaterial color="#eef6e6" fog={false} />
             </mesh>
-            <mesh position={[120, 95, 1510]} onUpdate={(m) => m.lookAt(0, 40, 0)}>
+            <mesh position={[0, 95, 1510]} onUpdate={(m) => m.lookAt(0, 40, 0)}>
                 <circleGeometry args={[230, 64]} />
-                <meshBasicMaterial color="#ff8fae" fog={false} transparent opacity={0.35} blending={THREE.AdditiveBlending} depthWrite={false} />
+                <meshBasicMaterial color="#a9e0bd" fog={false} transparent opacity={0.35} blending={THREE.AdditiveBlending} depthWrite={false} />
             </mesh>
-            <hemisphereLight args={['#ff9ad0', '#2a1030', 0.85]} />
+            <hemisphereLight args={['#a8e0c0', '#1e3a2b', 0.9]} />
             <directionalLight
-                color="#ffc98a"
-                intensity={1.9}
+                color="#eaf6d8"
+                intensity={1.6}
                 position={[30, 30, 140]}
                 castShadow
                 shadow-mapSize={[1024, 1024]}

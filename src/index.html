@@ -3,14 +3,14 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Most Wanted — Car Menu</title>
-    <link rel="stylesheet" href="./style.css">
+    <title>Sunset Drive</title>
+    <style>
+        html, body, #root { margin: 0; width: 100%; height: 100%; }
+        body { overflow: hidden; background: #1a0a1e; }
+    </style>
 </head>
 <body>
-    <canvas class="webgl"></canvas>
-    <div class="loading">Loading…</div>
-    <div class="drive-hint"><b>W A S D</b> / arrows to drive · steer with A / D</div>
-    <div class="speedo"><span class="speedo__val" id="kmh">0</span><span class="speedo__unit">km/h</span></div>
-    <script type="module" src="./script.js"></script>
+    <div id="root"></div>
+    <script type="module" src="./sunset.jsx"></script>
 </body>
 </html>
