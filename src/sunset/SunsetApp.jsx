@@ -57,7 +57,7 @@ function Title({ onStart }) {
     return (
         <div className="sunset-title">
             <h1>SUNSET<br />DRIVE</h1>
-            <p className="sunset-sub">an endless cruise</p>
+            <p className="sunset-sub">driving into the sunset</p>
             <button className="sunset-start" onClick={onStart}>PRESS TO DRIVE</button>
             <p className="sunset-controls">
                 <b>A</b> <b>D</b> STEER &middot; <b>V</b> CAMERA &middot; <b>C</b> PAINT &middot; <b>M</b> MUTE
