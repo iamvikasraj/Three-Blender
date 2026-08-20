@@ -3,6 +3,7 @@ import * as THREE from 'three'
 import { Canvas } from '@react-three/fiber'
 import { useProgress } from '@react-three/drei'
 import { SunsetScene } from './SunsetScene.jsx'
+import { MAPS } from './maps.js'
 import { useKeyboard } from '../game/input.js'
 import { drive } from './hudState.js'
 import { session } from './session.js'
@@ -16,6 +17,7 @@ const km = (m) => `${(m / 1000).toFixed(1)} km`
  */
 export function SunsetApp() {
     const [phase, setPhase] = useState('title')
+    const [mapIndex, setMapIndex] = useState(0)
     useKeyboard() // global key listeners for steering/camera/paint
 
     const begin = () => {
@@ -43,21 +45,29 @@ export function SunsetApp() {
                 camera={{ fov: 68, near: 0.1, far: 3200, position: [0, 3.4, -9.5] }}
             >
                 <Suspense fallback={null}>
-                    <SunsetScene />
+                    <SunsetScene map={MAPS[mapIndex]} />
                 </Suspense>
             </Canvas>
 
-            {phase === 'title' ? <Title onStart={begin} /> : <Hud />}
+            {phase === 'title'
+                ? <Title onStart={begin} mapIndex={mapIndex} setMapIndex={setMapIndex} />
+                : <Hud />}
             <Loading />
         </>
     )
 }
 
-function Title({ onStart }) {
+function Title({ onStart, mapIndex, setMapIndex }) {
     return (
         <div className="sunset-title">
             <h1>SUNSET<br />DRIVE</h1>
-            <p className="sunset-sub">an endless cruise</p>
+            <p className="sunset-sub">driving into the sunset</p>
+            <div className="sunset-maps">
+                {MAPS.map((m, i) => (
+                    <button key={m.id} className={`sunset-map${i === mapIndex ? ' is-active' : ''}`}
+                        onClick={() => setMapIndex(i)}>{m.name}</button>
+                ))}
+            </div>
             <button className="sunset-start" onClick={onStart}>PRESS TO DRIVE</button>
             <p className="sunset-controls">
                 <b>A</b> <b>D</b> STEER &middot; <b>V</b> CAMERA &middot; <b>C</b> PAINT &middot; <b>M</b> MUTE
@@ -74,6 +84,7 @@ function Hud() {
     const dist = useRef(null)
     const best = useRef(null)
     const record = useRef(null)
+    const lap = useRef(null)
     useEffect(() => {
         let raf
         const loop = () => {
@@ -82,6 +93,7 @@ function Hud() {
             if (paint.current) paint.current.textContent = drive.paint
             if (dist.current) dist.current.textContent = km(session.distance)
             if (best.current) best.current.textContent = km(session.best)
+            if (lap.current) lap.current.textContent = drive.lap
             if (record.current) record.current.style.opacity = session.newBest ? '1' : '0'
             raf = requestAnimationFrame(loop)
         }
@@ -91,6 +103,7 @@ function Hud() {
     return (
         <div className="sunset-hud">
             <div className="sunset-dist">
+                <b className="sunset-lap">LAP <span ref={lap}>1</span></b>
                 <span ref={dist}>0.0 km</span>
                 <small>BEST <b ref={best}>0.0 km</b></small>
                 <em ref={record}>NEW RECORD</em>

@@ -64,7 +64,7 @@ export function buildTrack({ points, roadWidth = 18, wallHeight = 4, wallBase = 
 
     // ── Centre dashes (dash 2 samples on / 3 off, lifted to avoid z-fight) ────
     const dv = [], di = []
-    const lh = 0.28
+    const lh = 0.4
     for (let i = 0; i < N; i++) {
         if (i % 5 >= 2) continue
         const n = new THREE.Vector3(T[i].z, 0, -T[i].x)
@@ -80,10 +80,26 @@ export function buildTrack({ points, roadWidth = 18, wallHeight = 4, wallBase = 
     }
     const lineGeo = makeGeo(dv, di)
 
+    // ── Solid edge lines: continuous thin ribbons just inside each road edge ──
+    const ev = [], ei = []
+    const ew = 0.4          // edge-line half width
+    const inset = half - 0.6
+    const pushEdge = (sign) => {
+        const base = ev.length / 3
+        for (let i = 0; i < N; i++) {
+            const n = new THREE.Vector3(T[i].z, 0, -T[i].x)
+            const cx = C[i].x + n.x * sign * inset, cz = C[i].z + n.z * sign * inset
+            ev.push(cx + n.x * ew, 0.03, cz + n.z * ew, cx - n.x * ew, 0.03, cz - n.z * ew)
+        }
+        for (let i = 0; i < N; i++) { const a = base + i * 2, b = base + ((i + 1) % N) * 2; ei.push(a, a + 1, b + 1, a, b + 1, b) }
+    }
+    pushEdge(1); pushEdge(-1)
+    const edgeGeo = makeGeo(ev, ei)
+
     const spawn = {
         x: C[0].x, y: 0, z: C[0].z,
         heading: Math.atan2(T[0].x, T[0].z),
     }
 
-    return { curve, roadGeo, wallGeo, lineGeo, spawn }
+    return { curve, roadGeo, wallGeo, lineGeo, edgeGeo, spawn }
 }
