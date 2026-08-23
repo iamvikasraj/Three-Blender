@@ -8,53 +8,56 @@ canvas { display: block; outline: none; }
     font-family: 'Press Start 2P', monospace;
 }
 
-.sunset-hint {
-    position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
-    font-size: 9px; line-height: 1.6; padding: 10px 16px;
-    background: rgba(10, 30, 22, 0.55); border-radius: 4px; white-space: nowrap;
+/* Game title — top-left, one line */
+.sunset-brand {
+    position: absolute; top: 22px; left: 22px; color: #cfe6da;
+    font: 8px 'Press Start 2P', monospace; letter-spacing: 0.16em;
+    text-transform: uppercase; line-height: 1.2; white-space: nowrap;
+    filter: drop-shadow(0 2px 0 #1f5c4a);
 }
-.sunset-hint b { color: #8fe0bd; }
 
-.sunset-mixer {
-    position: absolute; left: 24px; bottom: 92px; width: 190px; padding: 9px 10px;
-    pointer-events: auto; color: #cfe6da; background: rgba(10, 30, 22, 0.8);
-    border: 1px solid rgba(143, 224, 189, 0.5); font: 7px 'Press Start 2P', monospace;
+/* Top-right tools — one container, icons only, horizontally aligned */
+.sunset-tools {
+    position: absolute; top: 20px; right: 20px; pointer-events: auto;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 8px;
 }
+.sunset-tools__bar {
+    display: inline-flex; align-items: center; gap: 14px;
+}
+.sunset-tools__btn {
+    display: inline-flex; align-items: center; justify-content: center;
+    color: #cfe6da; background: none; border: none; padding: 4px; cursor: pointer;
+    filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.55));
+}
+.sunset-tools__btn:hover,
+.sunset-tools__btn.is-active { color: #8fe0bd; }
+.sunset-tools__btn svg { display: block; }
+.sunset-tools__panel {
+    min-width: 158px; padding: 11px 12px;
+    background: rgba(10, 30, 22, 0.86); border: 1px solid rgba(143, 224, 189, 0.4);
+    border-radius: 4px;
+}
+
+/* Controls key list (inside the CONTROLS tool) */
+.sunset-keys { list-style: none; font: 8px 'Press Start 2P', monospace; color: #cfe6da; }
+.sunset-keys li { display: flex; align-items: center; gap: 8px; padding: 5px 0; letter-spacing: 0.05em; }
+.sunset-keys__k { display: inline-flex; gap: 3px; }
+.sunset-keys b { color: #0e1f18; background: #8fe0bd; border-radius: 2px; padding: 3px 4px; font-weight: normal; }
+
+/* Audio mix (inside the AUDIO tool) */
+.sunset-mixer { color: #cfe6da; font: 7px 'Press Start 2P', monospace; }
 .sunset-mixer__title { color: #ffe08a; margin-bottom: 8px; }
 .sunset-mixer label { display: grid; grid-template-columns: 42px 1fr; align-items: center; gap: 7px; margin-top: 7px; }
 .sunset-mixer input { width: 100%; accent-color: #8fe0bd; }
 
-.sunset-equalizer {
-    position: absolute; inset: 0; z-index: 0; pointer-events: none;
-    display: flex; align-items: end; width: 100%; height: 100%; padding: 0 8px;
-    background: transparent; border: 0; opacity: 0.72; mix-blend-mode: screen;
-}
-.sunset-equalizer__bars { width: 100%; height: 100%; display: flex; align-items: end; gap: 3px; }
-.sunset-equalizer__bars i {
-    flex: 1; min-height: 5%; max-height: 94%; background: linear-gradient(180deg, #ffe08a 0%, #ff786d 34%, #c45cff 68%, #46d9ff 100%);
-    box-shadow: 0 0 9px rgba(196, 92, 255, 0.75); border-radius: 2px 2px 0 0;
-    transition: height 80ms linear; transform-origin: bottom;
-}
-
-
+/* Cam + paint status (bottom-centre, where the controls hint used to sit) */
 .sunset-cam {
-    position: absolute; top: 26px; right: 40px;
-    font-size: 10px; letter-spacing: 0.05em; opacity: 0.9;
+    position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+    font-size: 10px; letter-spacing: 0.05em; opacity: 0.9; white-space: nowrap;
+    padding: 10px 16px; background: rgba(10, 30, 22, 0.55); border-radius: 4px;
     text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
 }
 .sunset-cam b { color: #8fe0bd; }
-
-/* Distance / high-score (top-left) */
-.sunset-dist {
-    position: absolute; top: 24px; left: 24px;
-    font-family: 'Press Start 2P', monospace; color: #eef6ea;
-    display: flex; flex-direction: column; gap: 8px;
-    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.35);
-}
-.sunset-dist span { font-size: 18px; }
-.sunset-dist small { font-size: 9px; opacity: 0.8; }
-.sunset-dist small b { color: #8fe0bd; }
-.sunset-dist em { font-size: 10px; font-style: normal; color: #ffe08a; opacity: 0; transition: opacity 0.3s; }
 
 /* Title screen */
 .sunset-title {
@@ -92,6 +95,25 @@ canvas { display: block; outline: none; }
     text-shadow: 0 2px 0 rgba(0, 0, 0, 0.4);
 }
 
+.sunset-boost {
+    position: absolute; left: 22px; bottom: 24px; display: flex; align-items: center; gap: 10px;
+    font-family: 'Press Start 2P', monospace; font-size: 8px; color: #cfe6da;
+    letter-spacing: 0.08em; text-transform: uppercase; pointer-events: none;
+}
+.sunset-boost__label { color: #ffe08a; }
+.sunset-boost__bar {
+    position: relative; width: 118px; height: 12px; border: 1px solid rgba(143, 224, 189, 0.7);
+    background: rgba(8, 18, 15, 0.8); overflow: hidden; border-radius: 2px;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.06);
+}
+.sunset-boost__fill {
+    position: absolute; inset: 0 auto 0 0; width: 100%; height: 100%;
+    background: linear-gradient(90deg, #ffd26f 0%, #ff8a5b 28%, #ff5f6d 65%, #ff4d79 100%);
+    box-shadow: 0 0 12px rgba(255, 114, 98, 0.5);
+    transition: width 0.12s linear;
+}
+.sunset-boost__value { min-width: 38px; text-align: right; color: #8fe0bd; }
+
 /* Boost meter (above the speedo) */
 .sunset-controls b { color: #8fe0bd; }
 .sunset-best-title { font-size: 10px; color: #ffe08a; margin-top: 16px; letter-spacing: 0.08em; }
@@ -101,3 +123,22 @@ canvas { display: block; outline: none; }
     color: #fff; font-size: 14px; letter-spacing: 0.05em; padding: 10px 18px;
     background: rgba(30, 10, 34, 0.5); border-radius: 6px;
 }
+
+/* Outro fade — sinks the screen to black as the song ends, then lifts to
+   reveal the menu. Slow to darken, quicker to reveal. */
+.sunset-fade {
+    position: fixed; inset: 0; background: #05010a; z-index: 40;
+    opacity: 0; pointer-events: none; transition: opacity 1.2s ease;
+}
+.sunset-fade.is-black { opacity: 1; transition: opacity 9s ease-in; }
+
+/* Centre-screen song captions */
+.sunset-caption {
+    position: fixed; left: 50%; top: 26%; transform: translate(-50%, -50%);
+    max-width: 78vw; text-align: center; pointer-events: none;
+    font-family: 'Press Start 2P', monospace; font-size: 15px; line-height: 1.7;
+    color: #ffe9c2; letter-spacing: 0.04em;
+    text-shadow: 0 2px 0 rgba(0, 0, 0, 0.55), 0 0 18px rgba(255, 150, 90, 0.45);
+    opacity: 0; transition: opacity 0.45s ease;
+}
+.sunset-caption.is-visible { opacity: 1; }

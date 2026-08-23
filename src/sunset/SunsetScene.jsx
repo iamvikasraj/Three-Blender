@@ -8,7 +8,7 @@ import { CARS } from '../game/constants.js'
 import { keys } from '../game/input.js'
 import { drive } from './hudState.js'
 import { Retro } from './Retro.jsx'
-import { ps1CarModel, ps1Material } from './ps1.js'
+import { ps1CarModel } from './ps1.js'
 import { carHue, PAINTS } from './paint.js'
 import { session, bumpDistance } from './session.js'
 import { musicState, updateAudio } from './audio.js'
@@ -17,7 +17,7 @@ import { Ghosts } from './Ghosts.jsx'
 
 /**
  * Endless sunset cruise — a kinematic arcade drive (no physics). The car sits at
- * z = 0 and only slides left/right; the road markings and roadside pylons scroll
+ * z = 0 and only slides left/right; the road markings and roadside palms scroll
  * toward the camera and recycle, so you're forever heading into the sun that
  * sits far down +z. Steer-only: A/D or ← →.
  */
@@ -26,13 +26,13 @@ const ROAD_W = 22            // asphalt width (m)
 const MAX_X = ROAD_W / 2 - 1.4
 const BACK = -60             // recycle window (behind camera)
 const FWD = 900              // recycle window (ahead)
-const CRUISE = 42            // top cruise speed (m/s ≈ 151 km/h)
-const BOOST_SPEED = 58       // ~209 km/h while boosting
+const CRUISE = 52            // top cruise speed (m/s ≈ 187 km/h)
+const BOOST_SPEED = 72       // ~259 km/h while boosting
 const LAT_SPEED = 10         // lateral m/s
 const LAT_RESPONSE = 5.5
 const LAT_DRAG = 3.5
 const DASH_PITCH = 16
-const POST_PITCH = 34
+const PALM_PITCH = 32          // spacing of roadside palm groups
 
 /**
  * Camera presets, cycled with V (San-Andreas style, hard cuts). The car faces
@@ -49,9 +49,11 @@ const CAMS = [
 export function SunsetScene() {
     const { camera } = useThree()
     const carRef = useRef(null)
+    const brakeLightRef = useRef(null)
     const dashRef = useRef(null)
-    const postRef = useRef(null)
+    const skidRef = useRef(null)
     const { scene } = useGLTF(CAR.path)
+    const { scene: palmScene } = useGLTF('/models/tropical_palm_tree.glb')
 
     // ── Car: load, align nose to +z, seat on the road, index wheels ──────────
     const { carRoot, wheels } = useMemo(() => {
@@ -69,50 +71,158 @@ export function SunsetScene() {
         return { carRoot, wheels }
     }, [scene])
 
-    // ── Scrolling props: centre dashes + alternating neon pylons ─────────────
+    // ── Scrolling props: centre dashes ───────────────────────────────────────
     const dashGeo = useMemo(() => { const g = new THREE.PlaneGeometry(0.5, 4); g.rotateX(-Math.PI / 2); return g }, [])
     const dashMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#eef6ea' }), [])
+    const skidGeo = useMemo(() => { const g = new THREE.PlaneGeometry(1, 2.6); g.rotateX(-Math.PI / 2); return g }, [])
+    const skidMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#0b0b12', transparent: true, opacity: 0.8 }), [])
     const dashN = Math.ceil((FWD - BACK) / DASH_PITCH)
     const dashZ = useMemo(() => Array.from({ length: dashN }, (_, i) => BACK + i * DASH_PITCH), [dashN])
+    const skidMarks = useRef(Array.from({ length: 44 }, () => ({ active: false, x: 0, z: -2, rot: 0, life: 0 })))
 
-    const postGeo = useMemo(() => new THREE.BoxGeometry(0.4, 5, 0.4), [])
-    const postMat = useMemo(() => ps1Material(new THREE.MeshStandardMaterial({
-        color: '#06150f', emissive: '#4fd8a0', emissiveIntensity: 2.2, roughness: 0.4,
-    }), 90), [])
-    const postN = Math.ceil((FWD - BACK) / POST_PITCH) * 2
-    const posts = useMemo(() => Array.from({ length: postN }, (_, i) => {
+    // ── Roadside palms: authored GLB models spread across the wide apron ─────
+    const palmGroupRef = useRef(null)
+    const palmN = Math.ceil((FWD - BACK) / PALM_PITCH) * 4
+    const palms = useMemo(() => Array.from({ length: palmN }, (_, i) => {
         const side = i % 2 ? 1 : -1
-        return { z: BACK + Math.floor(i / 2) * POST_PITCH, x: side * (ROAD_W / 2 + 3) }
-    }), [postN])
+        const row = Math.floor(i / 2)
+        const noise = (seed) => (Math.sin(i * seed) + 1) / 2
+        return {
+            x: side * (ROAD_W / 2 + 3 + noise(1.71) * 8),
+            z: BACK + row * PALM_PITCH + noise(2.37) * 18 - 9,
+            rot: noise(3.19) * Math.PI * 2,
+            s: 0.72 + noise(4.11) * 0.52,
+            lean: (noise(5.43) - 0.5) * 0.18,
+            crownScale: 0.78 + noise(6.79) * 0.38,
+        }
+    }), [palmN])
+    const palmTrees = useMemo(() => palms.map((_, i) => {
+        const tree = cloneSkeleton(palmScene)
+        const bounds = new THREE.Box3().setFromObject(tree)
+        const height = Math.max(0.001, bounds.max.y - bounds.min.y)
+        tree.userData.modelScale = 6 / height
+        tree.scale.setScalar(tree.userData.modelScale)
+        const normalizedBounds = new THREE.Box3().setFromObject(tree)
+        tree.userData.baseY = -normalizedBounds.min.y
+        tree.position.y = tree.userData.baseY
+        tree.traverse((child) => {
+            if (!child.isMesh) return
+            child.castShadow = true
+            // Silhouette the palms against the sunset: near-black, unlit, but keep
+            // the leaf-cutout alpha from the source texture so the fronds read.
+            const src = Array.isArray(child.material) ? child.material[0] : child.material
+            const dark = new THREE.MeshBasicMaterial({ color: '#0a0812', fog: true })
+            // Keep the source map (color→black, but its alpha channel still cuts the
+            // fronds), alpha-tested so the leaf shapes stay crisp silhouettes.
+            if (src?.map) { dark.map = src.map; dark.alphaTest = 0.5; dark.side = THREE.DoubleSide }
+            child.material = dark
+        })
+        return tree
+    }), [palmScene, palms])
 
     const dummy = useMemo(() => new THREE.Object3D(), [])
-    const state = useRef({ carX: 0, lateralSpeed: 0, speed: 0, spin: 0, camX: 0, cam: 0, prevV: false, paint: 0, prevC: false, boost: 100, netT: 0 })
+    const state = useRef({ carX: 0, carZ: 0, lateralSpeed: 0, drift: 0, speed: 0, spin: 0, camX: 0, cam: 0, prevV: false, paint: 0, prevC: false, boost: 100, netT: 0, restX: 0 })
 
     useFrame((_, delta) => {
         const dt = Math.min(delta, 0.05)
         const s = state.current
 
+        const braking = session.started && (keys.KeyS || keys.ArrowDown) && s.speed > 8
+        if (brakeLightRef.current) {
+            brakeLightRef.current.intensity = braking ? 16 : 1.2
+            brakeLightRef.current.color.set(braking ? '#ff3b3b' : '#ffb173')
+        }
+
+        if (skidRef.current) {
+            for (const mark of skidMarks.current) {
+                if (!mark.active) continue
+                mark.life -= dt * 0.7
+                if (mark.life <= 0) {
+                    mark.active = false
+                    continue
+                }
+                mark.z -= s.speed * dt * 0.8
+                mark.x = s.carX + Math.sin(mark.life * 18) * 0.18
+            }
+
+            const activeMarks = skidMarks.current.filter((mark) => mark.active)
+            if (braking && s.speed > 20) {
+                const slot = skidMarks.current.find((mark) => !mark.active) || skidMarks.current[0]
+                slot.active = true
+                slot.life = 1
+                slot.x = s.carX
+                slot.z = -3.5
+                slot.rot = 0
+            }
+
+            for (let i = 0; i < skidMarks.current.length; i++) {
+                const mark = skidMarks.current[i]
+                if (!mark.active) {
+                    dummy.position.set(0, 0.03, -100)
+                    dummy.rotation.set(0, 0, 0)
+                    dummy.updateMatrix()
+                    skidRef.current.setMatrixAt(i, dummy.matrix)
+                    continue
+                }
+                dummy.position.set(mark.x, 0.02, mark.z)
+                dummy.rotation.set(0, mark.rot, 0)
+                dummy.scale.setScalar(0.9 + mark.life * 0.8)
+                dummy.updateMatrix()
+                skidRef.current.setMatrixAt(i, dummy.matrix)
+            }
+            skidRef.current.instanceMatrix.needsUpdate = true
+        }
+
         // Cruise, with a boost (Shift) — the bit of skill that lets you pull
-        // ahead of a rival. Meter drains while held, refills otherwise.
+        // ahead of a rival. Meter drains while held, refills otherwise. The whole
+        // drive accelerates as the track builds, and the final stretch floors it
+        // toward the sun for the outro.
+        const prog = session.started ? musicState.progress : 0
+        const cruise = CRUISE * (1 + prog * 0.7)
+        const finale = prog > 0.965
         const boosting = session.started && (keys.ShiftLeft || keys.ShiftRight) && s.boost > 0
-        const target = session.started ? (boosting ? BOOST_SPEED : CRUISE) : 0
-        s.speed += (target - s.speed) * Math.min(1, dt * (boosting ? 1 : 0.4))
-        s.boost = boosting ? Math.max(0, s.boost - 34 * dt) : Math.min(100, s.boost + 14 * dt)
+        const idle = !boosting && !finale && session.started
+        const target = session.started
+            ? (finale ? BOOST_SPEED * 2 : (boosting ? BOOST_SPEED * (1 + prog * 0.5) : cruise * (idle ? 0.45 : 1)))
+            : 0
+        s.speed += (target - s.speed) * Math.min(1, dt * (boosting || finale ? 1 : 0.26))
+        if (idle) s.speed = THREE.MathUtils.damp(s.speed, cruise * 0.45, 1.8, dt)
+        s.boost = boosting ? Math.max(0, s.boost - 18 * dt) : Math.min(100, s.boost + 22 * dt)
 
         // Steer-only: A/← left, D/→ right. Camera looks down +z, so screen-left
         // is world +x — steer left (+1) must increase carX.
         const steer = ((keys.KeyA || keys.ArrowLeft) ? 1 : 0) - ((keys.KeyD || keys.ArrowRight) ? 1 : 0)
         const steeringLimit = LAT_SPEED * (1 - Math.min(0.35, s.speed / BOOST_SPEED * 0.35))
-        const lateralTarget = steer * steeringLimit
-        s.lateralSpeed = THREE.MathUtils.damp(s.lateralSpeed, lateralTarget, steer ? LAT_RESPONSE : LAT_DRAG, dt)
-        s.carX = THREE.MathUtils.clamp(s.carX + s.lateralSpeed * dt, -MAX_X, MAX_X)
+        const driftBias = boosting ? 0.8 + Math.min(1.4, s.speed / BOOST_SPEED * 1.6) : 0
+        const lateralTarget = steer * (steeringLimit + driftBias)
+        s.lateralSpeed = THREE.MathUtils.damp(s.lateralSpeed, lateralTarget, steer ? LAT_RESPONSE + (boosting ? 0.8 : 0) : LAT_DRAG, dt)
+        s.drift = THREE.MathUtils.damp(s.drift, boosting && steer !== 0 ? steer * (0.42 + s.speed / BOOST_SPEED * 0.4) : 0, boosting ? 4.5 : 7.2, dt)
+
+        if (steer !== 0) {
+            s.restX = s.carX
+            const driftPush = boosting ? s.drift * 1.15 : 0
+            s.carX = THREE.MathUtils.clamp(s.carX + (s.lateralSpeed + driftPush) * dt, -MAX_X, MAX_X)
+        } else {
+            // When you let go, ease back toward the last offset you were holding,
+            // not to the literal center. This makes the car feel like it settles
+            // after a burst of acceleration or a quick lane change.
+            s.carX = THREE.MathUtils.damp(s.carX, s.restX, 2.2, dt)
+            s.drift = THREE.MathUtils.damp(s.drift, 0, 5.5, dt)
+        }
         if (Math.abs(s.carX) >= MAX_X) s.lateralSpeed = 0
 
-        // Car transform: slide + a little lean/yaw into the steer.
+        // Boost adds a forward Z drift in the car's facing direction; once the
+        // booster is released it settles back to the normal cruise position.
+        const cruiseZ = 0.15
+        const boostZTarget = boosting ? 2.2 + Math.min(4.5, s.speed * 0.04) : cruiseZ
+        s.carZ = THREE.MathUtils.damp(s.carZ, boostZTarget, boosting ? 5.5 : 7.5, dt)
+
+        // Car transform: slide + a little lean/yaw into the steer, with extra
+        // oversteer when boosting to feel like a proper drift.
         if (carRef.current) {
-            carRef.current.position.set(s.carX, 0, 0)
-            carRef.current.rotation.z = THREE.MathUtils.damp(carRef.current.rotation.z, -s.lateralSpeed / LAT_SPEED * 0.12, 7, dt)
-            carRef.current.rotation.y = THREE.MathUtils.damp(carRef.current.rotation.y, s.lateralSpeed / LAT_SPEED * 0.09, 7, dt)
+            carRef.current.position.set(s.carX, 0, s.carZ)
+            carRef.current.rotation.z = THREE.MathUtils.damp(carRef.current.rotation.z, -(s.lateralSpeed / LAT_SPEED * 0.08 + s.drift * 0.14), 9, dt)
+            carRef.current.rotation.y = THREE.MathUtils.damp(carRef.current.rotation.y, (s.lateralSpeed / LAT_SPEED * 0.06 + s.drift * 0.08), 9, dt)
         }
         s.spin += (s.speed / 0.34) * dt
         const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), s.spin)
@@ -128,26 +238,27 @@ export function SunsetScene() {
             }
             dashRef.current.instanceMatrix.needsUpdate = true
         }
-        // Scroll pylons likewise.
-        if (postRef.current) {
-            for (let i = 0; i < postN; i++) {
-                const p = posts[i]
+        // Scroll authored palms and recycle them into the wide roadside apron.
+        if (palmGroupRef.current) {
+            for (let i = 0; i < palmN; i++) {
+                const p = palms[i]
                 p.z -= s.speed * dt; if (p.z < BACK) p.z += (FWD - BACK)
-                dummy.position.set(p.x, 2.5, p.z); dummy.rotation.set(0, 0, 0); dummy.updateMatrix()
-                postRef.current.setMatrixAt(i, dummy.matrix)
+                const tree = palmGroupRef.current.children[i]
+                const treeScale = p.s * p.crownScale
+                tree.position.set(p.x, tree.userData.baseY * treeScale, p.z)
+                tree.rotation.set(0, p.rot, p.lean)
+                tree.scale.setScalar(tree.userData.modelScale * treeScale)
             }
-            postRef.current.instanceMatrix.needsUpdate = true
         }
 
         // Camera: cycle presets on V (edge-detected), then place it. Hard cuts.
         if (keys.KeyV && !s.prevV) s.cam = (s.cam + 1) % CAMS.length
         s.prevV = !!keys.KeyV
         const C = CAMS[s.cam]
-        const songProgress = musicState.progress
+        // Fixed chase cam: only tracks the car's lateral drift, no song-driven motion.
         s.camX += (s.carX * C.lag - s.camX) * Math.min(1, dt * C.follow)
-        const sunsetZ = C.back + songProgress * 35
-        camera.position.set(s.camX, C.height - songProgress * 0.8, sunsetZ)
-        camera.lookAt(s.carX * C.lookXMul, C.lookY - songProgress * 0.18, C.lookZ + songProgress * 100)
+        camera.position.set(s.camX, C.height, C.back)
+        camera.lookAt(s.carX * C.lookXMul, C.lookY, C.lookZ)
         if (camera.fov !== C.fov) { camera.fov = C.fov; camera.updateProjectionMatrix() }
 
         // Paint toggle on C (edge-detected): re-hue the whole car.
@@ -176,11 +287,12 @@ export function SunsetScene() {
     return (
         <>
             <Environment preset="synthwave" />
+            <axesHelper args={[12]} position={[0, 0.1, 0]} />
 
             {/* Ground apron + asphalt + solid edge lines (static; motion comes from the props) */}
             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.06, 700]} receiveShadow>
                 <planeGeometry args={[800, 1800]} />
-                <meshStandardMaterial color="#344c70" roughness={1} />
+                <meshStandardMaterial color="#3a2340" roughness={1} />
             </mesh>
             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0, 700]} receiveShadow>
                 <planeGeometry args={[ROAD_W, 1800]} />
@@ -193,13 +305,18 @@ export function SunsetScene() {
                 </mesh>
             ))}
             <instancedMesh ref={dashRef} args={[dashGeo, dashMat, dashN]} frustumCulled={false} />
-            <instancedMesh ref={postRef} args={[postGeo, postMat, postN]} frustumCulled={false} />
+            <group ref={palmGroupRef}>
+                {palmTrees.map((tree, i) => <primitive key={i} object={tree} />)}
+            </group>
 
             <group ref={carRef}>
                 <pointLight position={[-2.8, 2.8, -4]} color="#ffd0a0" intensity={8} distance={18} decay={2} />
                 <pointLight position={[2.5, 2, 2.5]} color="#8edbff" intensity={5} distance={15} decay={2} />
+                <pointLight ref={brakeLightRef} position={[0, 0.9, -2.45]} color="#ffb173" intensity={1.2} distance={18} decay={2} />
                 <primitive object={carRoot} />
             </group>
+
+            <instancedMesh ref={skidRef} args={[skidGeo, skidMat, skidMarks.current.length]} frustumCulled={false} />
 
             <Ghosts />
 
@@ -209,3 +326,4 @@ export function SunsetScene() {
 }
 
 useGLTF.preload(CAR.path)
+useGLTF.preload('/models/tropical_palm_tree.glb')

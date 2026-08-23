@@ -9,7 +9,7 @@ let ctx, master, sfxBus, engineOscs, engineGain, windGain, music, musicAnalyser,
 let started = false, muted = false, onMusicEnded = null
 let musicLevel = 0.8
 let sfxLevel = 0.4
-export const musicState = { progress: 0 }
+export const musicState = { progress: 0, time: 0 }
 
 export function startAudio(onEnded) {
     onMusicEnded = onEnded || onMusicEnded
@@ -41,6 +41,7 @@ export function startAudio(onEnded) {
     musicSource.connect(musicAnalyser)
     musicAnalyser.connect(master)
     music.addEventListener('timeupdate', () => {
+        musicState.time = music.currentTime
         musicState.progress = music.duration ? music.currentTime / music.duration : 0
     })
     music.addEventListener('ended', () => {
@@ -88,10 +89,35 @@ export function getMusicEnergy() {
     return total / (samples.length * 255)
 }
 
+/**
+ * Per-bar spectrum for the LED equalizer. Buckets the analyser's frequency bins
+ * into `barCount` bands (log-spaced so bass doesn't hog the meter) and writes
+ * 0..1 levels into `out`. Each bar reacts to its own band — no traveling wave.
+ */
+let spectrumBins
+export function getMusicSpectrum(barCount, out) {
+    if (!out || out.length !== barCount) out = new Float32Array(barCount)
+    if (!musicAnalyser) return out
+    const binCount = musicAnalyser.frequencyBinCount
+    if (!spectrumBins || spectrumBins.length !== binCount) spectrumBins = new Uint8Array(binCount)
+    musicAnalyser.getByteFrequencyData(spectrumBins)
+    // Use the lower ~85% of bins — the top bins are near-silent for music.
+    const usable = Math.floor(binCount * 0.85)
+    for (let i = 0; i < barCount; i++) {
+        const lo = Math.floor(Math.pow(i / barCount, 1.6) * usable)
+        const hi = Math.max(lo + 1, Math.floor(Math.pow((i + 1) / barCount, 1.6) * usable))
+        let peak = 0
+        for (let b = lo; b < hi && b < binCount; b++) if (spectrumBins[b] > peak) peak = spectrumBins[b]
+        // Slight low-band lift so the meter has body; clamp to 0..1.
+        out[i] = Math.min(1, (peak / 255) * (1 + (1 - i / barCount) * 0.35))
+    }
+    return out
+}
+
 /** Feed the drive loop: 0..1 speed, plus boost flag. */
 export function updateAudio(speed01, boosting = false) {
     if (!started) return
-    if (music?.duration) musicState.progress = music.currentTime / music.duration
+    if (music) { musicState.time = music.currentTime; if (music.duration) musicState.progress = music.currentTime / music.duration }
     const t = ctx.currentTime
     const hz = 46 + speed01 * 130 + (boosting ? 40 : 0)
     engineOscs.forEach((o) => o.frequency.setTargetAtTime(hz, t, 0.06))

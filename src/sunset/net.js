@@ -1,19 +1,17 @@
 import { PartySocket } from 'partysocket'
 
+const MULTIPLAYER_ENABLED = false
+
 /**
- * Multiplayer client. Connects to a PartyKit room, streams our car state, and
- * keeps every other player's latest state in `net.players` (a mutable map read
- * by the render loop — no React churn). `onRoster` fires only when players
- * join/leave, so React can track the list of ghosts to render.
- *
- * Dev talks to `partykit dev` on localhost:1999; set VITE_PARTYKIT_HOST to the
- * deployed host (e.g. sunset-boulevard.<you>.partykit.dev) for real play.
+ * Local single-player fallback. The sunset prototype is intentionally running
+ * without a multiplayer room for now, so all room connectivity is disabled and
+ * the UI keeps working in a self-contained mode.
  */
 const HOST = import.meta.env.VITE_PARTYKIT_HOST || 'localhost:1999'
 
 export const net = {
     id: null,
-    room: null,
+    room: 'solo',
     name: 'RACER',
     connected: false,
     players: {},        // id -> { id, name, dist, x, hue, kmh, boosting }
@@ -23,13 +21,24 @@ let socket = null
 const listeners = new Set()
 
 /** Subscribe to join/leave changes; returns an unsubscribe fn. */
-export function onRoster(fn) { listeners.add(fn); return () => listeners.delete(fn) }
+export function onRoster(fn) {
+    if (!MULTIPLAYER_ENABLED) return () => {}
+    listeners.add(fn)
+    return () => listeners.delete(fn)
+}
 function roster() { listeners.forEach((fn) => fn()) }
 
 /** Number of OTHER players currently in the room. */
-export function rivalCount() { return Object.keys(net.players).filter((id) => id !== net.id).length }
+export function rivalCount() { return 0 }
 
 export function connect(room) {
+    if (!MULTIPLAYER_ENABLED) {
+        net.room = room || 'solo'
+        net.connected = false
+        net.players = {}
+        net.id = null
+        return
+    }
     if (socket) return
     net.room = room
     socket = new PartySocket({ host: HOST, room })
@@ -54,10 +63,17 @@ export function connect(room) {
 }
 
 export function sendState(player) {
+    if (!MULTIPLAYER_ENABLED) return
     if (socket && socket.readyState === 1) socket.send(JSON.stringify({ type: 'state', player }))
 }
 
 export function disconnect() {
+    if (!MULTIPLAYER_ENABLED) {
+        net.connected = false
+        net.players = {}
+        net.id = null
+        return
+    }
     socket?.close()
     socket = null
     net.connected = false
@@ -70,7 +86,7 @@ export function ensureRoom() {
     const url = new URL(window.location.href)
     let room = url.searchParams.get('room')
     if (!room) {
-        room = Math.random().toString(36).slice(2, 8)
+        room = 'solo'
         url.searchParams.set('room', room)
         window.history.replaceState(null, '', url)
     }

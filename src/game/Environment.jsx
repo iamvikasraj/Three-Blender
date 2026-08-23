@@ -1,7 +1,9 @@
-import { useMemo } from 'react'
+import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
 import { useFrame } from '@react-three/fiber'
-import { musicState } from '../sunset/audio.js'
+import { musicState, getMusicEnergy, getMusicSpectrum } from '../sunset/audio.js'
+
+const EQ_BARS = 48 // vertical spectrum bars cut across the horizon
 
 /**
  * Sky + lighting. Three presets, ported from world.js:
@@ -99,28 +101,74 @@ function Sunset() {
 }
 
 function Synthwave() {
+    // Spectrum → a 1-D data texture the sky shader samples across the horizon.
+    const specData = useMemo(() => new Uint8Array(EQ_BARS), [])
+    const specTex = useMemo(() => {
+        const t = new THREE.DataTexture(specData, EQ_BARS, 1, THREE.RedFormat)
+        t.magFilter = THREE.NearestFilter
+        t.minFilter = THREE.NearestFilter
+        t.needsUpdate = true
+        return t
+    }, [specData])
+    const levels = useRef(new Float32Array(EQ_BARS)) // smoothed bar levels
+    const rawSpec = useRef(new Float32Array(EQ_BARS)) // raw per-frame spectrum
+
     const skyMat = useMemo(() => new THREE.ShaderMaterial({
         side: THREE.BackSide,
         fog: false,
         depthWrite: false,
         uniforms: {
-            uTop: { value: new THREE.Color('#08002f') },
-            uMid: { value: new THREE.Color('#3b078f') },
-            uHorizon: { value: new THREE.Color('#ff7514') },
+            uTop: { value: new THREE.Color('#0c1f66') },     // deep dusk blue
+            uMid: { value: new THREE.Color('#b8477c') },     // muted rose-magenta seam
+            uHorizon: { value: new THREE.Color('#ff6a1e') }, // blazing orange
             uProgress: { value: 0 },
+            uPulse: { value: 0 },
+            uSpectrum: { value: specTex },
+            uShowEq: { value: 0 }, // 0 = hidden, 1 = show the vertical bars
         },
         vertexShader: /* glsl */`
-            varying vec3 vDir;
-            void main() { vDir = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+            varying vec3 vDir; varying vec4 vClip;
+            void main() {
+                vDir = normalize(position);
+                vClip = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                gl_Position = vClip;
+            }
         `,
         fragmentShader: /* glsl */`
-            varying vec3 vDir; uniform vec3 uTop; uniform vec3 uMid; uniform vec3 uHorizon; uniform float uProgress;
+            varying vec3 vDir; varying vec4 vClip; uniform vec3 uTop; uniform vec3 uMid; uniform vec3 uHorizon;
+            uniform float uProgress; uniform float uPulse; uniform sampler2D uSpectrum; uniform float uShowEq;
             void main() {
                 float h = max(vDir.y, 0.0);
-                vec3 c = mix(uHorizon, uMid, smoothstep(0.0, 0.2, h));
-                c = mix(c, uTop, smoothstep(0.2, 0.8, h));
-                float glow = exp(-abs(vDir.y) * 70.0);
-                c += vec3(1.0, 0.16, 0.015) * glow * 0.22 * (1.0 - uProgress);
+
+                // ── Layer 1 — FIXED horizon: a full-blown sunset ramp, driven by
+                // SCREEN-space height so the bands stay dead-flat (no spherical bowing).
+                // sy: 0 bottom → 1 top; the horizon sits ~0.52 up the screen.
+                float sy = clamp(vClip.y / vClip.w * 0.5 + 0.5, 0.0, 1.0);
+                float t = clamp((sy - 0.50) / 0.50, 0.0, 1.0);
+                vec3 sun = vec3(1.00, 0.80, 0.38);
+                vec3 c = mix(sun, uHorizon, smoothstep(0.0, 0.06, t));
+                c = mix(c, uMid, smoothstep(0.05, 0.15, t));
+                c = mix(c, uTop, smoothstep(0.13, 0.48, t));
+                float baseGlow = exp(-abs(vDir.y) * 62.0);
+                c += vec3(1.0, 0.34, 0.08) * baseGlow * (0.35 + uPulse * 0.25) * (1.0 - uProgress);
+
+                // ── Layer 2 — MOVING equalizer: vertical bars spread across the front
+                // horizon, each rising to its own spectrum band. They're lit in the
+                // SAME sunset gradient — just brighter — so they read as glowing
+                // columns of the same colours, not a separate overlay.
+                float az = atan(vDir.x, vDir.z);          // 0 straight ahead at the sun
+                float u = az / 2.0 + 0.5;                  // spread bars across the front
+                if (uShowEq > 0.5 && u > 0.0 && u < 1.0 && vDir.z > 0.0) {
+                    float level = texture2D(uSpectrum, vec2(u, 0.5)).r;
+                    float barH = 0.02 + level * 0.34;      // column height from the horizon
+                    float slot = fract(u * float(${EQ_BARS})); // position within this bar
+                    float col = smoothstep(0.12, 0.20, slot) * (1.0 - smoothstep(0.80, 0.88, slot));
+                    float below = 1.0 - smoothstep(barH - 0.015, barH, h); // filled up to barH
+                    float bar = col * below * step(0.0, vDir.y);
+                    c += c * bar * 0.85;                   // brighten the same gradient into a lit column
+                }
+
+                // Nightfall as the song ends.
                 vec3 nightHorizon = vec3(0.055, 0.035, 0.14);
                 vec3 nightZenith = vec3(0.002, 0.006, 0.025);
                 vec3 night = mix(nightHorizon, nightZenith, smoothstep(0.0, 0.8, h));
@@ -128,14 +176,30 @@ function Synthwave() {
                 gl_FragColor = vec4(c, 1.0);
             }
         `,
-    }), [])
+    }), [specTex])
 
-    useFrame(() => { skyMat.uniforms.uProgress.value = musicState.progress })
+    const pulse = useRef(0)
+    useFrame(() => {
+        // Feed the bar heights into the texture, fast attack / slow release.
+        const raw = getMusicSpectrum(EQ_BARS, rawSpec.current)
+        rawSpec.current = raw
+        const L = levels.current
+        for (let i = 0; i < EQ_BARS; i++) {
+            L[i] += (raw[i] - L[i]) * (raw[i] > L[i] ? 0.5 : 0.12)
+            specData[i] = Math.min(255, L[i] * 255)
+        }
+        specTex.needsUpdate = true
+        // Overall energy still gently breathes the fixed horizon glow.
+        const e = Math.min(1, getMusicEnergy() * 3.2)
+        pulse.current += (e - pulse.current) * (e > pulse.current ? 0.4 : 0.07)
+        skyMat.uniforms.uProgress.value = musicState.progress
+        skyMat.uniforms.uPulse.value = pulse.current
+    })
 
     return (
         <>
-            <color attach="background" args={['#08002f']} />
-            <fog attach="fog" args={['#4a2c85', 120, 900]} />
+            <color attach="background" args={['#0c1f66']} />
+            <fog attach="fog" args={['#6b2c50', 120, 900]} />
             <mesh material={skyMat}>
                 <sphereGeometry args={[1600, 32, 16]} />
             </mesh>
