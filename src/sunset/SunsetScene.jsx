@@ -27,11 +27,18 @@ const ROAD_W = 22            // asphalt width (m)
 const MAX_X = ROAD_W / 2 - 1.4
 const BACK = -60             // recycle window (behind camera)
 const FWD = 900              // recycle window (ahead)
-const CRUISE = 52            // top cruise speed (m/s ≈ 187 km/h)
-const BOOST_SPEED = 72       // ~259 km/h while boosting
-const LAT_SPEED = 10         // lateral m/s
-const LAT_RESPONSE = 5.5
-const LAT_DRAG = 3.5
+const CRUISE = 32            // top cruise speed (m/s ≈ 115 km/h)
+const BOOST_SPEED = 45       // ~162 km/h while boosting
+const WHEELBASE = 2.7        // m — turning radius R = wheelbase / tan(steer)
+const MAX_STEER = 0.36       // rad at a standstill; shrinks quickly with speed
+const STEER_IN = 2.2         // the wheel cranks to lock slowly, like a real column
+const STEER_OUT = 1.8        // …and eases back to centre
+const HEADING_CAP = 0.42     // rad — gentle lane changes, never sideways
+const HEADING_MASS = 3.6     // chassis inertia — the body follows the wheels with weight
+const ALIGN_GRIP = 1.8       // hands off: the tyres realign the nose with the road
+const ENGINE_POWER = 8       // m/s² at launch, falling off toward top speed
+const BRAKE_POWER = 18       // m/s²
+const COAST_DRAG = 1.6       // m/s² engine braking, plus a little aero drag
 const DASH_PITCH = 16
 const PALM_PITCH = 32          // spacing of roadside palm groups
 const PLAYER_HALF_W = 1.0    // player car collision half-extents (m)
@@ -61,7 +68,7 @@ export function SunsetScene() {
     const { scene: palmScene } = useGLTF('/models/tropical_palm_tree.glb')
 
     // ── Car: load, align nose to +z, seat on the road, index wheels ──────────
-    const { carRoot, wheels } = useMemo(() => {
+    const { carRoot, wheels, frontWheels } = useMemo(() => {
         const model = cloneSkeleton(scene)
         const size = new THREE.Box3().setFromObject(model).getSize(new THREE.Vector3())
         model.scale.setScalar(4.4 / Math.max(size.x, size.y, size.z))
@@ -73,7 +80,9 @@ export function SunsetScene() {
         const wheels = []
         model.traverse((o) => { if (CAR.wheelPattern.test(o.name)) { o.userData.base = o.quaternion.clone(); wheels.push(o) } })
         ps1CarModel(carRoot, 90, carHue) // PS1 wobble + crunchy textures + paintable hue
-        return { carRoot, wheels }
+        // Front wheels (nose is +z) get the steering angle on top of the roll.
+        const byZ = wheels.slice().sort((a, b) => a.getWorldPosition(new THREE.Vector3()).z - b.getWorldPosition(new THREE.Vector3()).z)
+        return { carRoot, wheels, frontWheels: byZ.slice(-2) }
     }, [scene])
 
     // ── Scrolling props: centre dashes ───────────────────────────────────────
@@ -126,7 +135,7 @@ export function SunsetScene() {
     }), [palmScene, palms])
 
     const dummy = useMemo(() => new THREE.Object3D(), [])
-    const state = useRef({ carX: 0, carZ: 0, lateralSpeed: 0, drift: 0, speed: 0, spin: 0, camX: 0, cam: 0, prevV: false, paint: 0, prevC: false, boost: 100, netT: 0, restX: 0, shake: 0, hitCooldown: [] })
+    const state = useRef({ carX: 0, carZ: 0, heading: 0, targetHeading: 0, steerAngle: 0, drift: 0, speed: 0, spin: 0, camX: 0, cam: 0, prevV: false, paint: 0, prevC: false, boost: 100, netT: 0, shake: 0, hitCooldown: [] })
 
     useFrame((_, delta) => {
         const dt = Math.min(delta, 0.05)
@@ -178,43 +187,54 @@ export function SunsetScene() {
             skidRef.current.instanceMatrix.needsUpdate = true
         }
 
-        // Cruise, with a boost (Shift) — the bit of skill that lets you pull
-        // ahead of a rival. Meter drains while held, refills otherwise. The whole
-        // drive accelerates as the track builds, and the final stretch floors it
-        // toward the sun for the outro.
+        // Pedals, not autopilot: W/↑ is the throttle, S/↓ the brake, and with
+        // no input the car coasts down on engine braking + drag. Boost (Shift)
+        // raises the top speed while the tank lasts. The drive still quickens
+        // as the song builds, and the finale stretch pins the throttle.
         const prog = session.started ? musicState.progress : 0
-        const cruise = CRUISE * (1 + prog * 0.7)
         const finale = prog > 0.965
         const boosting = session.started && (keys.ShiftLeft || keys.ShiftRight) && s.boost > 0
-        const idle = !boosting && !finale && session.started
-        const target = session.started
-            ? (finale ? BOOST_SPEED * 2 : (boosting ? BOOST_SPEED * (1 + prog * 0.5) : cruise * (idle ? 0.45 : 1)))
-            : 0
-        s.speed += (target - s.speed) * Math.min(1, dt * (boosting || finale ? 1 : 0.26))
-        if (idle) s.speed = THREE.MathUtils.damp(s.speed, cruise * 0.45, 1.8, dt)
+        const throttling = session.started && (keys.KeyW || keys.ArrowUp)
+        const vTop = finale ? BOOST_SPEED * 2 : boosting ? BOOST_SPEED * (1 + prog * 0.5) : CRUISE * (1 + prog * 0.7)
+        if (throttling || boosting || finale) {
+            // Engine power fades as you approach top speed — a real power curve.
+            s.speed = Math.min(vTop, s.speed + ENGINE_POWER * Math.max(0.12, 1 - s.speed / vTop) * dt)
+        } else if (braking) {
+            s.speed = Math.max(0, s.speed - BRAKE_POWER * dt)
+        } else {
+            s.speed = Math.max(0, s.speed - (COAST_DRAG + s.speed * 0.012) * dt)
+        }
         if (boosting) s.boost = Math.max(0, s.boost - 18 * dt)   // limited tank — refills only via takedowns
 
-        // Steer-only: A/← left, D/→ right. Camera looks down +z, so screen-left
-        // is world +x — steer left (+1) must increase carX.
-        const steer = ((keys.KeyA || keys.ArrowLeft) ? 1 : 0) - ((keys.KeyD || keys.ArrowRight) ? 1 : 0)
-        const steeringLimit = LAT_SPEED * (1 - Math.min(0.35, s.speed / BOOST_SPEED * 0.35))
-        const driftBias = boosting ? 0.8 + Math.min(1.4, s.speed / BOOST_SPEED * 1.6) : 0
-        const lateralTarget = steer * (steeringLimit + driftBias)
-        s.lateralSpeed = THREE.MathUtils.damp(s.lateralSpeed, lateralTarget, steer ? LAT_RESPONSE + (boosting ? 0.8 : 0) : LAT_DRAG, dt)
-        s.drift = THREE.MathUtils.damp(s.drift, boosting && steer !== 0 ? steer * (0.42 + s.speed / BOOST_SPEED * 0.4) : 0, boosting ? 4.5 : 7.2, dt)
+        // ── Kinematic bicycle: the front wheels hold a steering angle, which
+        // sets a turning radius, which rotates the heading; the car then moves
+        // where the nose points. Left (A/←) steers toward +x (screen-left).
+        const steerInput = ((keys.KeyA || keys.ArrowLeft) ? 1 : 0) - ((keys.KeyD || keys.ArrowRight) ? 1 : 0)
+        // Less lock at speed (stability), a touch more while boosting (drift out)
+        const steerLock = MAX_STEER / (1 + s.speed / 18) * (boosting ? 1.25 : 1)
+        const steerTarget = steerInput * steerLock
+        s.steerAngle = THREE.MathUtils.damp(s.steerAngle, steerTarget, steerInput ? STEER_IN : STEER_OUT, dt)
 
-        if (steer !== 0) {
-            s.restX = s.carX
-            const driftPush = boosting ? s.drift * 1.15 : 0
-            s.carX = THREE.MathUtils.clamp(s.carX + (s.lateralSpeed + driftPush) * dt, -MAX_X, MAX_X)
-        } else {
-            // When you let go, ease back toward the last offset you were holding,
-            // not to the literal center. This makes the car feel like it settles
-            // after a burst of acceleration or a quick lane change.
-            s.carX = THREE.MathUtils.damp(s.carX, s.restX, 2.2, dt)
-            s.drift = THREE.MathUtils.damp(s.drift, 0, 5.5, dt)
+        // Yaw rate from the bicycle geometry — no speed, no turn. The chassis
+        // carries inertia: the nose follows the wheels' command with weight,
+        // so the car leans into a turn instead of snapping like a bicycle.
+        const yawRate = (s.speed / WHEELBASE) * Math.tan(s.steerAngle)
+        s.targetHeading = THREE.MathUtils.clamp(s.targetHeading + yawRate * dt, -HEADING_CAP, HEADING_CAP)
+        // Hands off: grip walks the nose back parallel to the road.
+        if (steerInput === 0) s.targetHeading = THREE.MathUtils.damp(s.targetHeading, 0, ALIGN_GRIP, dt)
+        s.heading = THREE.MathUtils.damp(s.heading, s.targetHeading, HEADING_MASS, dt)
+
+        // The car travels along its heading; forward progress is the z-part.
+        const fwdSpeed = s.speed * Math.cos(s.heading)
+        s.carX += Math.sin(s.heading) * s.speed * dt
+        if (Math.abs(s.carX) > MAX_X) {
+            // Road edge: scrape along the shoulder, nose forced parallel.
+            s.carX = THREE.MathUtils.clamp(s.carX, -MAX_X, MAX_X)
+            s.targetHeading = THREE.MathUtils.damp(s.targetHeading, 0, 8, dt)
+            s.heading = THREE.MathUtils.damp(s.heading, 0, 8, dt)
         }
-        if (Math.abs(s.carX) >= MAX_X) s.lateralSpeed = 0
+        // Boost drift: rear steps out visually (kept for the arcade feel).
+        s.drift = THREE.MathUtils.damp(s.drift, boosting && steerInput !== 0 ? steerInput * (0.42 + s.speed / BOOST_SPEED * 0.4) : 0, boosting ? 4.5 : 7.2, dt)
 
         // Traffic: ram a sedan to WRECK it and bank boost (a takedown); trucks
         // & buses are heavy obstacles that scrape your speed off, so dodge them.
@@ -232,7 +252,7 @@ export function SunsetScene() {
                         s.speed *= 0.5
                         const kickDir = dx !== 0 ? Math.sign(dx) : (i % 2 ? 1 : -1)
                         s.carX = THREE.MathUtils.clamp(s.carX + kickDir * 3.2, -MAX_X, MAX_X)
-                        s.restX = s.carX
+                        s.targetHeading = kickDir * 0.28   // knocked sideways, nose kicked out
                         s.shake = 1
                     } else {
                         box.smash = true
@@ -249,21 +269,29 @@ export function SunsetScene() {
         const boostZTarget = boosting ? 2.2 + Math.min(4.5, s.speed * 0.04) : cruiseZ
         s.carZ = THREE.MathUtils.damp(s.carZ, boostZTarget, boosting ? 5.5 : 7.5, dt)
 
-        // Car transform: slide + a little lean/yaw into the steer, with extra
-        // oversteer when boosting to feel like a proper drift.
+        // Car transform: the nose follows the heading (plus drift tail-out),
+        // the body rolls against the lateral g of the turn.
+        const lateralG = yawRate * s.speed
         if (carRef.current) {
             carRef.current.position.set(s.carX, 0, s.carZ)
-            carRef.current.rotation.z = THREE.MathUtils.damp(carRef.current.rotation.z, -(s.lateralSpeed / LAT_SPEED * 0.08 + s.drift * 0.14), 9, dt)
-            carRef.current.rotation.y = THREE.MathUtils.damp(carRef.current.rotation.y, (s.lateralSpeed / LAT_SPEED * 0.06 + s.drift * 0.08), 9, dt)
+            carRef.current.rotation.z = THREE.MathUtils.damp(carRef.current.rotation.z, THREE.MathUtils.clamp(lateralG * 0.004, -0.12, 0.12) - s.drift * 0.05, 9, dt)
+            carRef.current.rotation.y = s.heading + s.drift * 0.12
+            carRef.current.rotation.x = THREE.MathUtils.damp(carRef.current.rotation.x, boosting ? -0.03 : 0, 6, dt)
         }
+        // Wheels: all roll; the front pair also shows the steering angle.
         s.spin += (s.speed / 0.34) * dt
-        const q = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), s.spin)
-        for (const w of wheels) w.quaternion.copy(w.userData.base).multiply(q)
+        const qSpin = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), s.spin)
+        const qSteer = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), s.steerAngle)
+        for (const w of wheels) {
+            w.quaternion.copy(w.userData.base)
+            if (frontWheels.includes(w)) w.quaternion.multiply(qSteer)
+            w.quaternion.multiply(qSpin)
+        }
 
         // Scroll dashes toward -z, recycle to the front.
         if (dashRef.current) {
             for (let i = 0; i < dashN; i++) {
-                let z = dashZ[i] - s.speed * dt; if (z < BACK) z += (FWD - BACK)
+                let z = dashZ[i] - fwdSpeed * dt; if (z < BACK) z += (FWD - BACK)
                 dashZ[i] = z
                 dummy.position.set(0, 0.02, z); dummy.rotation.set(0, 0, 0); dummy.updateMatrix()
                 dashRef.current.setMatrixAt(i, dummy.matrix)
@@ -274,7 +302,7 @@ export function SunsetScene() {
         if (palmGroupRef.current) {
             for (let i = 0; i < palmN; i++) {
                 const p = palms[i]
-                p.z -= s.speed * dt; if (p.z < BACK) p.z += (FWD - BACK)
+                p.z -= fwdSpeed * dt; if (p.z < BACK) p.z += (FWD - BACK)
                 const tree = palmGroupRef.current.children[i]
                 const treeScale = p.s * p.crownScale
                 tree.position.set(p.x, tree.userData.baseY * treeScale, p.z)
@@ -315,7 +343,7 @@ export function SunsetScene() {
         let gap = null
         for (const id in net.players) { if (id !== net.id) { gap = Math.round(net.players[id].dist - session.distance); break } }
 
-        drive.kmh = Math.round(s.speed * 3.6)
+        drive.kmh = Math.round(fwdSpeed * 3.6)
         drive.cam = C.name
         drive.paint = PAINTS[s.paint].name
         drive.boost = s.boost / 100
@@ -325,7 +353,6 @@ export function SunsetScene() {
     return (
         <>
             <Environment preset="synthwave" />
-            <axesHelper args={[12]} position={[0, 0.1, 0]} />
 
             {/* Ground apron + asphalt + solid edge lines (static; motion comes from the props) */}
             <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, -0.06, 700]} receiveShadow>

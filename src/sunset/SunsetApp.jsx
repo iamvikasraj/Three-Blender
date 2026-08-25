@@ -189,7 +189,6 @@ function Hud() {
     const boost = useRef(null)
     const boostFill = useRef(null)
     const speed = useRef(null)
-    const lap = useRef(null)
     const [tool, setTool] = useState(null) // 'audio' | 'controls' | null
     const toggle = (name) => setTool((t) => (t === name ? null : name))
     useEffect(() => {
@@ -204,7 +203,6 @@ function Hud() {
             if (boost.current) boost.current.textContent = `${Math.round(drive.boost * 100)}%`
             if (boostFill.current) boostFill.current.style.width = `${Math.max(0, Math.min(100, drive.boost * 100))}%`
             if (speed.current) speed.current.textContent = drive.kmh
-            if (lap.current) lap.current.textContent = `LAP ${drive.lap}`
             raf = requestAnimationFrame(loop)
         }
         raf = requestAnimationFrame(loop)
@@ -216,7 +214,6 @@ function Hud() {
             <div className="sunset-brand" aria-label="Sunset Boulevard" title="Sunset Boulevard">
                 SUNSET BOULEVARD
             </div>
-            <div className="sunset-lap" ref={lap}>LAP 1</div>
             <div className="sunset-dash" aria-live="polite">
                 <div className="sunset-dash__speed">
                     <span className="sunset-dash__kmh" ref={speed}>0</span>
