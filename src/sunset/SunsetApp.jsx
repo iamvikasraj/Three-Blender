@@ -9,6 +9,7 @@ import { session } from './session.js'
 import { musicState, setMusicVolume, setSfxVolume, startAudio, toggleMute } from './audio.js'
 import { lyricWordsAt } from './lyrics.js'
 import { net, connect, ensureRoom, onRoster, rivalCount } from './net.js'
+import { settings, loadSettings, setSteeringSensitivity } from './settings.js'
 
 const km = (m) => `${(m / 1000).toFixed(1)} km`
 const NAME = 'RACER ' + Math.random().toString(36).slice(2, 5).toUpperCase()
@@ -89,6 +90,7 @@ export function SunsetApp() {
 
     // Single-player mode for now: no room connection or rival roster.
     useEffect(() => {
+        loadSettings()
         net.name = NAME
         net.room = 'solo'
         bumpVisitors()
@@ -186,9 +188,11 @@ function Title({ onStart }) {
 function Hud() {
     const cam = useRef(null)
     const gap = useRef(null)
-    const boost = useRef(null)
-    const boostFill = useRef(null)
     const speed = useRef(null)
+    const crashes = useRef(null)
+    const nearMisses = useRef(null)
+    const distance = useRef(null)
+    const bestScore = useRef(null)
     const [tool, setTool] = useState(null) // 'audio' | 'controls' | null
     const toggle = (name) => setTool((t) => (t === name ? null : name))
     useEffect(() => {
@@ -200,9 +204,11 @@ function Hud() {
                 else if (drive.gap >= 0) gap.current.textContent = `RIVAL AHEAD ${drive.gap} m`
                 else gap.current.textContent = `RIVAL BEHIND ${-drive.gap} m`
             }
-            if (boost.current) boost.current.textContent = `${Math.round(drive.boost * 100)}%`
-            if (boostFill.current) boostFill.current.style.width = `${Math.max(0, Math.min(100, drive.boost * 100))}%`
             if (speed.current) speed.current.textContent = drive.kmh
+            if (crashes.current) crashes.current.textContent = drive.crashes
+            if (nearMisses.current) nearMisses.current.textContent = drive.nearMisses
+            if (distance.current) distance.current.textContent = `${drive.distance.toFixed(1)} km`
+            if (bestScore.current) bestScore.current.textContent = `${drive.bestScore.toFixed(1)} km`
             raf = requestAnimationFrame(loop)
         }
         raf = requestAnimationFrame(loop)
@@ -215,16 +221,19 @@ function Hud() {
                 SUNSET BOULEVARD
             </div>
             <div className="sunset-dash" aria-live="polite">
-                <div className="sunset-dash__speed">
-                    <span className="sunset-dash__kmh" ref={speed}>0</span>
-                    <span className="sunset-dash__unit">KM/H</span>
-                </div>
-                <div className="sunset-dash__boost">
-                    <span className="sunset-boost__label">BOOST</span>
-                    <div className="sunset-boost__bar">
-                        <div className="sunset-boost__fill" ref={boostFill} />
+                <div className="sunset-dash__speedometer">
+                    <div className="sunset-stat sunset-stat--left">
+                        <span className="sunset-stat__label">CRASHES</span>
+                        <span className="sunset-stat__value" ref={crashes}>0</span>
                     </div>
-                    <span className="sunset-boost__value" ref={boost}>100%</span>
+                    <div className="sunset-dash__speed">
+                        <span className="sunset-dash__kmh" ref={speed}>0</span>
+                        <span className="sunset-dash__unit">KM/H</span>
+                    </div>
+                    <div className="sunset-stat sunset-stat--right">
+                        <span className="sunset-stat__label">NEAR MISS</span>
+                        <span className="sunset-stat__value" ref={nearMisses}>0</span>
+                    </div>
                 </div>
             </div>
 
@@ -251,6 +260,24 @@ function Hud() {
                             <li><span className="sunset-keys__k"><b>V</b></span> CAM</li>
                             <li><span className="sunset-keys__k"><b>M</b></span> MUTE</li>
                         </ul>
+                        <div className="sunset-slider">
+                            <label htmlFor="steer-sens">STEERING SENSITIVITY</label>
+                            <div className="sunset-slider__container">
+                                <span className="sunset-slider__label">SLOW</span>
+                                <input 
+                                    id="steer-sens"
+                                    type="range" 
+                                    min="0.3" 
+                                    max="2.0" 
+                                    step="0.1"
+                                    defaultValue={settings.steeringSensitivity}
+                                    onChange={(e) => setSteeringSensitivity(Number(e.target.value))}
+                                    className="sunset-slider__input"
+                                />
+                                <span className="sunset-slider__label">FAST</span>
+                            </div>
+                            <div className="sunset-slider__value">{settings.steeringSensitivity.toFixed(1)}x</div>
+                        </div>
                     </div>
                 )}
             </div>

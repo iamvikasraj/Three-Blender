@@ -98,6 +98,14 @@ canvas { display: block; width: 100%; height: 100%; outline: none; }
 .sunset-mixer label { display: grid; grid-template-columns: 42px 1fr; align-items: center; gap: 7px; margin-top: 7px; }
 .sunset-mixer input { width: 100%; accent-color: #8fe0bd; }
 
+/* Steering sensitivity slider (inside the CONTROLS tool) */
+.sunset-slider { color: #cfe6da; font: 7px 'Press Start 2P', monospace; margin-top: 12px; }
+.sunset-slider label { display: block; color: #ffe08a; margin-bottom: 6px; font-size: 6px; letter-spacing: 0.05em; }
+.sunset-slider__container { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.sunset-slider__label { font-size: 5px; color: #a0c4a8; flex: 0 0 auto; }
+.sunset-slider__input { flex: 1; accent-color: #8fe0bd; }
+.sunset-slider__value { text-align: center; color: #8fe0bd; font-size: 8px; font-weight: bold; letter-spacing: 0.05em; }
+
 /* Cam status — inline in the top-right tools bar, just left of the icons */
 .sunset-cam {
     font: 8px 'Press Start 2P', monospace; letter-spacing: 0.08em;
@@ -159,6 +167,9 @@ canvas { display: block; width: 100%; height: 100%; outline: none; }
     font-family: 'Press Start 2P', monospace;
     opacity: 0.75;
 }
+.sunset-dash__speedometer {
+    display: flex; align-items: center; gap: 24px; justify-content: center;
+}
 .sunset-dash__speed { display: flex; align-items: baseline; gap: 8px; }
 .sunset-dash__kmh {
     font-size: 22px; line-height: 1; color: rgba(255, 255, 255, 0.9);
@@ -184,6 +195,17 @@ canvas { display: block; width: 100%; height: 100%; outline: none; }
 }
 .sunset-boost__value {
     min-width: 34px; text-align: right; color: rgba(255, 255, 255, 0.55);
+}
+
+/* Stats — crashes and near miss 24px left/right of speedometer */
+.sunset-stat {
+    display: flex; flex-direction: column; align-items: center; gap: 4px;
+    font-size: 8px; color: rgba(255, 255, 255, 0.6); letter-spacing: 0.08em; text-transform: uppercase;
+}
+.sunset-stat__label { color: rgba(255, 255, 255, 0.45); font-size: 6px; }
+.sunset-stat__value {
+    font-size: 16px; color: rgba(255, 255, 255, 0.9); font-weight: bold;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); min-width: 32px; text-align: center;
 }
 
 /* Boost meter (above the speedo) */

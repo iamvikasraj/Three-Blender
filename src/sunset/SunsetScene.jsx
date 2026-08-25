@@ -6,13 +6,14 @@ import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.j
 import { Environment } from '../game/Environment.jsx'
 import { CARS } from '../game/constants.js'
 import { keys } from '../game/input.js'
-import { drive } from './hudState.js'
+import { drive, getBestScore, updateBestScore } from './hudState.js'
 import { Retro } from './Retro.jsx'
 import { ps1CarModel } from './ps1.js'
 import { carHue, PAINTS } from './paint.js'
 import { session, bumpDistance } from './session.js'
 import { musicState, updateAudio } from './audio.js'
 import { net, sendState } from './net.js'
+import { settings } from './settings.js'
 import { Ghosts } from './Ghosts.jsx'
 import { Traffic, trafficBoxes } from './Traffic.jsx'
 
@@ -23,28 +24,27 @@ import { Traffic, trafficBoxes } from './Traffic.jsx'
  * sits far down +z. Steer-only: A/D or ← →.
  */
 const CAR = CARS.bmw
-const ROAD_W = 22            // asphalt width (m)
+const ROAD_W = 16            // asphalt width (m) — narrower road
 const MAX_X = ROAD_W / 2 - 1.4
 const BACK = -60             // recycle window (behind camera)
 const FWD = 900              // recycle window (ahead)
-const CRUISE = 32            // top cruise speed (m/s ≈ 115 km/h)
-const BOOST_SPEED = 45       // ~162 km/h while boosting
+const TOP_SPEED = 80         // top speed (m/s ≈ 288 km/h, like a real M3)
 const WHEELBASE = 2.7        // m — turning radius R = wheelbase / tan(steer)
 const MAX_STEER = 0.36       // rad at a standstill; shrinks quickly with speed
 const STEER_IN = 2.2         // the wheel cranks to lock slowly, like a real column
 const STEER_OUT = 1.8        // …and eases back to centre
 const HEADING_CAP = 0.42     // rad — gentle lane changes, never sideways
-const HEADING_MASS = 3.6     // chassis inertia — the body follows the wheels with weight
+const HEADING_MASS = 5.5     // chassis inertia — heavier at speed means slower response
 const ALIGN_GRIP = 1.8       // hands off: the tyres realign the nose with the road
-const ENGINE_POWER = 8       // m/s² at launch, falling off toward top speed
-const BRAKE_POWER = 18       // m/s²
-const COAST_DRAG = 1.6       // m/s² engine braking, plus a little aero drag
+const ENGINE_POWER = 22       // m/s² at launch, falling off toward top speed
+const BRAKE_POWER = 32       // m/s² strong braking
+const COAST_DRAG = 2.8       // m/s² engine braking, plus a little aero drag
 const DASH_PITCH = 16
 const PALM_PITCH = 32          // spacing of roadside palm groups
 const PLAYER_HALF_W = 1.0    // player car collision half-extents (m)
 const PLAYER_HALF_L = 2.2
 const HIT_COOLDOWN = 0.8     // s — stops one overlap re-triggering every frame
-const SMASH_BOOST = 28       // boost meter % banked per car you ram/wreck
+const SMASH_BOOST = 28       // unused; kept for compatibility
 
 /**
  * Camera presets, cycled with V (San-Andreas style, hard cuts). The car faces
@@ -54,7 +54,7 @@ const SMASH_BOOST = 28       // boost meter % banked per car you ram/wreck
  */
 const CAMS = [
     { name: 'CHASE',  lag: 0.6, follow: 3,  height: 2.8,  back: -7.2, lookXMul: 0.4, lookY: 1.35, lookZ: 32, fov: 64 },
-    { name: 'NEAR',   lag: 0.7, follow: 4,  height: 1.9,  back: -4.2, lookXMul: 0.5, lookY: 1.1,  lookZ: 30, fov: 70 },
+    { name: 'NEAR',   lag: 0.7, follow: 4,  height: 1.9,  back: -6.8, lookXMul: 0.5, lookY: 1.1,  lookZ: 30, fov: 70 },
     { name: 'BONNET', lag: 1.0, follow: 12, height: 1.05, back: 2.2,  lookXMul: 1.0, lookY: 1.15, lookZ: 60, fov: 82 },
 ]
 
@@ -92,7 +92,7 @@ export function SunsetScene() {
     const skidMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#0b0b12', transparent: true, opacity: 0.8 }), [])
     const dashN = Math.ceil((FWD - BACK) / DASH_PITCH)
     const dashZ = useMemo(() => Array.from({ length: dashN }, (_, i) => BACK + i * DASH_PITCH), [dashN])
-    const skidMarks = useRef(Array.from({ length: 44 }, () => ({ active: false, x: 0, z: -2, rot: 0, life: 0 })))
+    const skidMarks = useRef(Array.from({ length: 88 }, () => ({ active: false, x: 0, z: -2, rot: 0, life: 0, wheelPos: 0 })))
 
     // ── Roadside palms: authored GLB models spread across the wide apron ─────
     const palmGroupRef = useRef(null)
@@ -135,7 +135,7 @@ export function SunsetScene() {
     }), [palmScene, palms])
 
     const dummy = useMemo(() => new THREE.Object3D(), [])
-    const state = useRef({ carX: 0, carZ: 0, heading: 0, targetHeading: 0, steerAngle: 0, drift: 0, speed: 0, spin: 0, camX: 0, cam: 0, prevV: false, paint: 0, prevC: false, boost: 100, netT: 0, shake: 0, hitCooldown: [] })
+    const state = useRef({ carX: 0, carZ: 0, heading: 0, targetHeading: 0, steerAngle: 0, drift: 0, speed: 0, spin: 0, camX: 0, cam: 1, prevV: false, paint: 0, prevC: false, netT: 0, shake: 0, hitCooldown: [], crashes: 0, nearMisses: 0, nearMissTracked: {}, nearMissBoostTime: 0 })
 
     useFrame((_, delta) => {
         const dt = Math.min(delta, 0.05)
@@ -161,12 +161,21 @@ export function SunsetScene() {
 
             const activeMarks = skidMarks.current.filter((mark) => mark.active)
             if (braking && s.speed > 20) {
-                const slot = skidMarks.current.find((mark) => !mark.active) || skidMarks.current[0]
-                slot.active = true
-                slot.life = 1
-                slot.x = s.carX
-                slot.z = -3.5
-                slot.rot = 0
+                // Create marks from 4 wheels: front-left, front-right, rear-left, rear-right
+                const wheelOffset = 0.9  // half-width of car (where wheels are)
+                const frontZ = -2.8      // front wheel offset
+                const rearZ = -4.2       // rear wheel offset
+                for (let wheelSide of [-1, 1]) {
+                    for (let wheelZ of [frontZ, rearZ]) {
+                        const slot = skidMarks.current.find((mark) => !mark.active) || skidMarks.current[0]
+                        slot.active = true
+                        slot.life = 1
+                        slot.x = s.carX + wheelSide * wheelOffset
+                        slot.z = wheelZ
+                        slot.rot = 0
+                        slot.wheelPos = wheelSide  // track left/right
+                    }
+                }
             }
 
             for (let i = 0; i < skidMarks.current.length; i++) {
@@ -174,17 +183,28 @@ export function SunsetScene() {
                 if (!mark.active) {
                     dummy.position.set(0, 0.03, -100)
                     dummy.rotation.set(0, 0, 0)
+                    dummy.scale.setScalar(0.1)  // invisible when inactive
                     dummy.updateMatrix()
                     skidRef.current.setMatrixAt(i, dummy.matrix)
                     continue
                 }
                 dummy.position.set(mark.x, 0.02, mark.z)
                 dummy.rotation.set(0, mark.rot, 0)
-                dummy.scale.setScalar(0.9 + mark.life * 0.8)
+                dummy.scale.setScalar(1.0)  // constant width for wheel marks
                 dummy.updateMatrix()
                 skidRef.current.setMatrixAt(i, dummy.matrix)
             }
             skidRef.current.instanceMatrix.needsUpdate = true
+            
+            // Update material color opacity per instance
+            if (skidRef.current.material) {
+                const colors = []
+                for (const mark of skidMarks.current) {
+                    const alpha = mark.active ? mark.life * 0.8 : 0
+                    colors.push(alpha)
+                }
+                skidRef.current.material.opacity = 0.8
+            }
         }
 
         // Pedals, not autopilot: W/↑ is the throttle, S/↓ the brake, and with
@@ -192,26 +212,23 @@ export function SunsetScene() {
         // raises the top speed while the tank lasts. The drive still quickens
         // as the song builds, and the finale stretch pins the throttle.
         const prog = session.started ? musicState.progress : 0
-        const finale = prog > 0.965
-        const boosting = session.started && (keys.ShiftLeft || keys.ShiftRight) && s.boost > 0
         const throttling = session.started && (keys.KeyW || keys.ArrowUp)
-        const vTop = finale ? BOOST_SPEED * 2 : boosting ? BOOST_SPEED * (1 + prog * 0.5) : CRUISE * (1 + prog * 0.7)
-        if (throttling || boosting || finale) {
+        if (throttling) {
             // Engine power fades as you approach top speed — a real power curve.
-            s.speed = Math.min(vTop, s.speed + ENGINE_POWER * Math.max(0.12, 1 - s.speed / vTop) * dt)
+            s.speed = Math.min(TOP_SPEED, s.speed + ENGINE_POWER * Math.max(0.12, 1 - s.speed / TOP_SPEED) * dt)
         } else if (braking) {
             s.speed = Math.max(0, s.speed - BRAKE_POWER * dt)
         } else {
             s.speed = Math.max(0, s.speed - (COAST_DRAG + s.speed * 0.012) * dt)
         }
-        if (boosting) s.boost = Math.max(0, s.boost - 18 * dt)   // limited tank — refills only via takedowns
 
         // ── Kinematic bicycle: the front wheels hold a steering angle, which
         // sets a turning radius, which rotates the heading; the car then moves
         // where the nose points. Left (A/←) steers toward +x (screen-left).
         const steerInput = ((keys.KeyA || keys.ArrowLeft) ? 1 : 0) - ((keys.KeyD || keys.ArrowRight) ? 1 : 0)
-        // Less lock at speed (stability), a touch more while boosting (drift out)
-        const steerLock = MAX_STEER / (1 + s.speed / 18) * (boosting ? 1.25 : 1)
+        // Less lock at speed (stability) — denominator reduced to 12 for slower turns at speed
+        // Apply steering sensitivity multiplier (0.3–2.0x) to control responsiveness
+        const steerLock = (MAX_STEER / (1 + s.speed / 12)) * settings.steeringSensitivity
         const steerTarget = steerInput * steerLock
         s.steerAngle = THREE.MathUtils.damp(s.steerAngle, steerTarget, steerInput ? STEER_IN : STEER_OUT, dt)
 
@@ -234,40 +251,58 @@ export function SunsetScene() {
             s.heading = THREE.MathUtils.damp(s.heading, 0, 8, dt)
         }
         // Boost drift: rear steps out visually (kept for the arcade feel).
-        s.drift = THREE.MathUtils.damp(s.drift, boosting && steerInput !== 0 ? steerInput * (0.42 + s.speed / BOOST_SPEED * 0.4) : 0, boosting ? 4.5 : 7.2, dt)
+        s.drift = THREE.MathUtils.damp(s.drift, 0, 7.2, dt)
 
-        // Traffic: ram a sedan to WRECK it and bank boost (a takedown); trucks
-        // & buses are heavy obstacles that scrape your speed off, so dodge them.
-        // Boost is a limited tank — refilled ONLY by takedowns.
+        // Traffic: detect collisions (crashes) and near misses
         if (session.started) {
-            for (let i = 0; i < trafficBoxes.length; i++) {
-                if ((s.hitCooldown[i] || 0) > 0) { s.hitCooldown[i] -= dt; continue }
-                const box = trafficBoxes[i]
-                if (box.smash) continue
-                const dx = s.carX - box.x
-                const dz = s.carZ - box.z
-                if (Math.abs(dx) < PLAYER_HALF_W + box.halfWidth && Math.abs(dz) < PLAYER_HALF_L + box.halfLen) {
-                    s.hitCooldown[i] = HIT_COOLDOWN
-                    if (box.big) {
-                        s.speed *= 0.5
-                        const kickDir = dx !== 0 ? Math.sign(dx) : (i % 2 ? 1 : -1)
-                        s.carX = THREE.MathUtils.clamp(s.carX + kickDir * 3.2, -MAX_X, MAX_X)
-                        s.targetHeading = kickDir * 0.28   // knocked sideways, nose kicked out
-                        s.shake = 1
-                    } else {
-                        box.smash = true
-                        s.boost = Math.min(100, s.boost + SMASH_BOOST)
-                        s.speed *= 0.9
-                        s.shake = 0.55
-                    }
-                }
-            }
+           for (let i = 0; i < trafficBoxes.length; i++) {
+               if ((s.hitCooldown[i] || 0) > 0) { s.hitCooldown[i] -= dt; continue }
+               const box = trafficBoxes[i]
+               if (box.smash) continue
+               const dx = s.carX - box.x
+               const dz = s.carZ - box.z
+               const collisionDist = PLAYER_HALF_W + box.halfWidth
+               const collisionDz = PLAYER_HALF_L + box.halfLen
+               const nearMissDist = collisionDist * 1.5
+               const nearMissDz = collisionDz * 1.5
+                 
+               // Detect crash (collision)
+               if (Math.abs(dx) < collisionDist && Math.abs(dz) < collisionDz) {
+                   s.hitCooldown[i] = HIT_COOLDOWN
+                   s.crashes++
+                   delete s.nearMissTracked[i]  // clear near miss tracking for this box
+                   if (box.big) {
+                       // Crash into truck: car stalls and resets to center with 0 speed
+                       s.speed = 0
+                       s.carX = 0  // reset to center of road
+                       s.targetHeading = 0
+                       s.heading = 0
+                       s.steerAngle = 0
+                       s.shake = 2  // strong impact shake
+                   } else {
+                       box.smash = true
+                       s.speed *= 0.9
+                       s.shake = 0.55
+                   }
+               } 
+               // Detect near miss (close but no collision)
+               else if (!s.nearMissTracked[i] && Math.abs(dx) < nearMissDist && Math.abs(dz) < nearMissDz) {
+                   s.nearMisses++
+                   s.nearMissTracked[i] = true
+                   // Grant 10 km/h speed boost for 5 seconds
+                   s.speed += 10 / 3.6  // convert km/h to m/s
+                   s.nearMissBoostTime = 5.0  // 5 second boost duration
+               }
+           }
         }
-        // Boost adds a forward Z drift in the car's facing direction; once the
-        // booster is released it settles back to the normal cruise position.
+        
+        // Update near miss boost timer
+        if (s.nearMissBoostTime > 0) {
+           s.nearMissBoostTime -= dt
+        }
+        // Camera Z height: stay at cruise position
         const cruiseZ = 0.15
-        const boostZTarget = boosting ? 2.2 + Math.min(4.5, s.speed * 0.04) : cruiseZ
-        s.carZ = THREE.MathUtils.damp(s.carZ, boostZTarget, boosting ? 5.5 : 7.5, dt)
+        s.carZ = THREE.MathUtils.damp(s.carZ, cruiseZ, 7.5, dt)
 
         // Car transform: the nose follows the heading (plus drift tail-out),
         // the body rolls against the lateral g of the turn.
@@ -276,7 +311,7 @@ export function SunsetScene() {
             carRef.current.position.set(s.carX, 0, s.carZ)
             carRef.current.rotation.z = THREE.MathUtils.damp(carRef.current.rotation.z, THREE.MathUtils.clamp(lateralG * 0.004, -0.12, 0.12) - s.drift * 0.05, 9, dt)
             carRef.current.rotation.y = s.heading + s.drift * 0.12
-            carRef.current.rotation.x = THREE.MathUtils.damp(carRef.current.rotation.x, boosting ? -0.03 : 0, 6, dt)
+            carRef.current.rotation.x = THREE.MathUtils.damp(carRef.current.rotation.x, 0, 6, dt)
         }
         // Wheels: all roll; the front pair also shows the steering angle.
         s.spin += (s.speed / 0.34) * dt
@@ -332,13 +367,13 @@ export function SunsetScene() {
         s.prevC = !!keys.KeyC
 
         if (session.started) bumpDistance(Math.abs(s.speed) * dt)
-        updateAudio(Math.min(1, s.speed / CRUISE), boosting)
+        updateAudio(Math.min(1, s.speed / TOP_SPEED))
 
         // Broadcast our state ~15 Hz and read the rival gap.
         s.netT += dt
         if (s.netT > 0.066) {
             s.netT = 0
-            sendState({ name: net.name, dist: session.distance, x: s.carX, hue: carHue.value, kmh: drive.kmh, boosting })
+            sendState({ name: net.name, dist: session.distance, x: s.carX, hue: carHue.value, kmh: drive.kmh })
         }
         let gap = null
         for (const id in net.players) { if (id !== net.id) { gap = Math.round(net.players[id].dist - session.distance); break } }
@@ -346,7 +381,17 @@ export function SunsetScene() {
         drive.kmh = Math.round(fwdSpeed * 3.6)
         drive.cam = C.name
         drive.paint = PAINTS[s.paint].name
-        drive.boost = s.boost / 100
+        drive.crashes = s.crashes
+        drive.nearMisses = s.nearMisses
+        drive.distance = Math.round(session.distance / 1000 * 10) / 10  // km
+        drive.time = Math.round(musicState.time)  // seconds
+        drive.nearMissBoostActive = s.nearMissBoostTime
+         
+        // Calculate score (distance - crashes penalty)
+        const score = drive.distance - s.crashes * 0.5
+        updateBestScore(score)
+        drive.bestScore = getBestScore()
+
         drive.gap = gap
     })
 

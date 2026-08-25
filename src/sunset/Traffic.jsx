@@ -23,9 +23,9 @@ import { session } from './session.js'
 // All vehicles are heavy obstacles — clipping one scrapes your speed off,
 // so you want to dodge them. They crawl along slow so you blow past them.
 const VEHICLES = {
-    tractor: { path: '/models/traffic%20cars/tractor_cab_traffic_burnout_3.glb', len: 6.4, halfWidth: 1.3, modelYaw: 0, speed: [10, 14], big: true },
-    longnose: { path: '/models/traffic%20cars/longnose_cab_traffic_burnout_3.glb', len: 7.2, halfWidth: 1.35, modelYaw: 0, speed: [10, 14], big: true },
-    bus: { path: '/models/traffic%20cars/city_bus_traffic_burnout_3.glb', len: 11, halfWidth: 1.45, modelYaw: 0, speed: [9, 12], big: true },
+    tractor: { path: '/models/traffic%20cars/tractor_cab_traffic_burnout_3.glb', len: 6.4, halfWidth: 1.3, modelYaw: 0, speed: [8, 18], big: true },
+    longnose: { path: '/models/traffic%20cars/longnose_cab_traffic_burnout_3.glb', len: 7.2, halfWidth: 1.35, modelYaw: 0, speed: [9, 17], big: true },
+    bus: { path: '/models/traffic%20cars/city_bus_traffic_burnout_3.glb', len: 11, halfWidth: 1.45, modelYaw: 0, speed: [7, 15], big: true },
 }
 // Trucks and buses only — heavy obstacles to dodge.
 const TYPES = [VEHICLES.tractor, VEHICLES.longnose, VEHICLES.tractor, VEHICLES.bus, VEHICLES.longnose, VEHICLES.tractor]
@@ -34,18 +34,24 @@ const BACK = -60
 const FWD = 900
 const SPAN = FWD - BACK
 const TRAFFIC_N = 6   // sparse — trucks far apart, ~160 m between vehicles
-const LANES = [-8.5, -6, -3.5, 3.5, 6, 8.5]   // both sides of the centre line
-const LANE_JITTER = 1
+const LANES = [-6, -4, -2, 2, 4, 6]   // both sides of the centre line — narrower 16m road
+const LANE_JITTER = 0.6   // lane variation within bounds
 
-const noise = (i, seed) => (Math.sin(i * seed + seed) + 1) / 2
-
+// Truly random generation — each vehicle gets random lane, speed, and initial spacing
 const DEFS = Array.from({ length: TRAFFIC_N }, (_, i) => {
     const type = TYPES[i % TYPES.length]
+    // Random lane assignment (0-5 index, or pick a lane from LANES array)
+    const laneIndex = Math.floor(Math.random() * LANES.length)
+    const x = LANES[laneIndex] + (Math.random() - 0.5) * LANE_JITTER
+    // Random speed within range
+    const speed = type.speed[0] + Math.random() * (type.speed[1] - type.speed[0])
+    // Random spacing between vehicles (80-200m apart)
+    const spacing = 80 + Math.random() * 120
     return {
         type,
-        z0: BACK + (i / TRAFFIC_N) * SPAN + (noise(i, 1.7) - 0.5) * 40,
-        x: LANES[i % LANES.length] + (noise(i, 3.3) - 0.5) * LANE_JITTER,
-        speed: type.speed[0] + noise(i, 5.1) * (type.speed[1] - type.speed[0]),
+        z0: BACK + (i / TRAFFIC_N) * SPAN + (Math.random() - 0.5) * spacing * 0.5,
+        x,
+        speed,
     }
 })
 
