@@ -6,14 +6,16 @@ import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.j
 import { CARS } from '../game/constants.js'
 import { ps1CarModel } from './ps1.js'
 import { net, onRoster } from './net.js'
-import { session } from './session.js'
+import { track } from './track.js'
 
 /**
- * Renders every OTHER player's car on our road. Both players share the same
- * endless road, so a rival at track-distance `dist` sits at world z equal to the
- * gap between us — you literally watch them pull ahead (+z) or drop back (−z).
+ * Renders every OTHER player's car on our circuit. Both players share the same
+ * deterministic loop, so a rival's total distance maps straight onto the track:
+ * (dist mod L) is their arc position, their `x` is the lateral lane offset.
  */
 const CAR = CARS.bmw
+const _p = new THREE.Vector3()
+const _l = new THREE.Vector3()
 
 export function Ghosts() {
     const [ids, setIds] = useState([])
@@ -48,7 +50,12 @@ function Ghost({ id }) {
         if (!p) { g.visible = false; return }
         g.visible = true
         hue.value = p.hue || 0
-        g.position.set(p.x || 0, 0, (p.dist || 0) - session.distance)
+        const gs = track.wrap(p.dist || 0)
+        track.pointAtS(gs, _p)
+        track.leftAtS(gs, _l)
+        const x = p.x || 0
+        g.position.set(_p.x + _l.x * x, 0, _p.z + _l.z * x)
+        g.rotation.set(0, track.yawAtS(gs), 0)
     })
 
     return <group ref={groupRef}><primitive object={model} /></group>

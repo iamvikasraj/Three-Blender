@@ -41,7 +41,11 @@ export function findRoadSurface(root) {
                 (a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3, (a.z + b.z + c.z) / 3,
             ))
         }
-        if (points.length > 40) candidates.push({ mesh, points, area })
+        // Skip coarse filler geometry — a huge flat "ground"/backdrop quad scores
+        // well on raw area alone, but real pavement is tessellated at road-lane
+        // scale (a few m² per triangle), not tens of metres per triangle.
+        const avgTriArea = points.length ? area / points.length : Infinity
+        if (points.length > 40 && avgTriArea < 60) candidates.push({ mesh, points, area, avgTriArea })
     })
 
     const lum = (m) => {

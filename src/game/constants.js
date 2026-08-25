@@ -19,7 +19,7 @@ export const USE_CIRCUIT = true
  * a centerline, so road/wall/spawn are known by construction) instead of the
  * ripped circuit. This is the path that fixes wall-climbing/getting-stuck.
  */
-export const USE_TRACK = true
+export const USE_TRACK = false
 
 /**
  * Closed-loop centerline for the procedural track, as [x, z] metres. A flowing
@@ -115,6 +115,17 @@ export const ROAD = {
 
 // ── Circuit ───────────────────────────────────────────────────────────────────
 export const CIRCUIT = {
-    path: '/models/maps/opt/burnout_eternal_city.glb',
+    // The Rockport rip is split across several GLBs (export/size limit) — load
+    // and merge all of them so the streets these parts border actually connect.
+    path: [
+        '/models/maps/opt/nfs_most_wanted_2005_-_rockport_map_part_1.glb',
+        '/models/maps/opt/nfs_most_wanted_-_rockport_map_part_2.glb',
+        '/models/maps/opt/nfs_most_wanted_rockport_map_part_3.glb',
+        '/models/maps/opt/nfs_most_wanted_rockport_map_part_5.glb',
+        '/models/maps/opt/nfs_most_wanted_rockport_map_part_6.glb',
+        '/models/maps/opt/nfs_most_wanted_rockport_map_part_7.glb',
+        '/models/maps/opt/nfs_most_wanted_rockport_map_part_10.glb',
+        '/models/maps/opt/nfs_most_wanted_rockport_map_part_11.glb',
+    ],
     TARGET_SPAN: 3100,
 }

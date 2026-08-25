@@ -70,16 +70,9 @@ function Sunset() {
     return (
         <>
             <fog attach="fog" args={['#bfe0c2', 70, 480]} />
-            <mesh material={skyMat} position={[0, 280, 820]}>
-                <planeGeometry args={[2200, 700]} />
-            </mesh>
-            <mesh position={[0, 95, 1500]} onUpdate={(m) => m.lookAt(0, 40, 0)}>
-                <circleGeometry args={[150, 64]} />
-                <meshBasicMaterial color="#eef6e6" fog={false} />
-            </mesh>
-            <mesh position={[0, 95, 1510]} onUpdate={(m) => m.lookAt(0, 40, 0)}>
-                <circleGeometry args={[230, 64]} />
-                <meshBasicMaterial color="#a9e0bd" fog={false} transparent opacity={0.35} blending={THREE.AdditiveBlending} depthWrite={false} />
+            {/* Full sky dome — the circuit loops, so every heading needs sky */}
+            <mesh material={skyMat}>
+                <sphereGeometry args={[1900, 32, 24]} />
             </mesh>
             <hemisphereLight args={['#a8e0c0', '#1e3a2b', 0.9]} />
             <directionalLight
