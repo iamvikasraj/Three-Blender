@@ -17,25 +17,23 @@ import { session } from './session.js'
  *
  * Dedicated ripped rigs (not the player's own car) — length is the model's
  * longest raw dimension (they're all authored nose/tail along Z), so scaling
- * by `len` keeps a bus reading as bus-sized next to a sedan. `halfWidth` feeds
+ * by `len` keeps a bus reading as bus-sized next to a truck. `halfWidth` feeds
  * SunsetScene's collision check.
  */
-// `big` cars (trucks/buses) are heavy obstacles to dodge — clipping one scrapes
-// your speed. Small cars (sedans) are takedown targets: ram them to wreck them
-// and bank boost. Sedans race along faster so they read as live traffic.
+// All vehicles are heavy obstacles — clipping one scrapes your speed off,
+// so you want to dodge them. They crawl along slow so you blow past them.
 const VEHICLES = {
-    sedan: { path: '/models/traffic%20cars/sedan_2_burnout_3.glb', len: 4.6, halfWidth: 0.95, modelYaw: 0, speed: [24, 34], big: false },
     tractor: { path: '/models/traffic%20cars/tractor_cab_traffic_burnout_3.glb', len: 6.4, halfWidth: 1.3, modelYaw: 0, speed: [10, 14], big: true },
     longnose: { path: '/models/traffic%20cars/longnose_cab_traffic_burnout_3.glb', len: 7.2, halfWidth: 1.35, modelYaw: 0, speed: [10, 14], big: true },
     bus: { path: '/models/traffic%20cars/city_bus_traffic_burnout_3.glb', len: 11, halfWidth: 1.45, modelYaw: 0, speed: [9, 12], big: true },
 }
-// Weighted mix — mostly sedans, the occasional truck or bus.
-const TYPES = [VEHICLES.sedan, VEHICLES.sedan, VEHICLES.sedan, VEHICLES.tractor, VEHICLES.sedan, VEHICLES.sedan, VEHICLES.longnose, VEHICLES.sedan, VEHICLES.bus]
+// Trucks and buses only — heavy obstacles to dodge.
+const TYPES = [VEHICLES.tractor, VEHICLES.longnose, VEHICLES.tractor, VEHICLES.bus, VEHICLES.longnose, VEHICLES.tractor]
 
 const BACK = -60
 const FWD = 900
 const SPAN = FWD - BACK
-const TRAFFIC_N = 16
+const TRAFFIC_N = 6   // sparse — trucks far apart, ~160 m between vehicles
 const LANES = [-8.5, -6, -3.5, 3.5, 6, 8.5]   // both sides of the centre line
 const LANE_JITTER = 1
 
