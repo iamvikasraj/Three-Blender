@@ -6,14 +6,14 @@ import { clone as cloneSkeleton } from 'three/examples/jsm/utils/SkeletonUtils.j
 import { ps1Model } from './ps1.js'
 import { drive } from './hudState.js'
 import { session } from './session.js'
-import { track } from './track.js'
 
 /**
- * Ambient traffic on the loop: slow vehicles holding their lane (a lateral
- * offset from the centre line) while advancing along the track's arc length
- * at their own pace. The player is faster, so you catch and overtake them.
- * Collision data is shared through `trafficBoxes` — SunsetScene reads it
- * every frame, the same "mutable bridge, no re-render" pattern as `drive`.
+ * Ambient traffic: slow vehicles scattered across every lane that the player
+ * cruises past. Positioned with the same scroll-and-recycle trick as the road
+ * props in SunsetScene, but scrolled by the RELATIVE speed (player − traffic)
+ * so faster traffic falls further behind while slower traffic gets overtaken.
+ * Reads the player's speed off the `drive` HUD bridge so this stays decoupled
+ * from SunsetScene's frame loop.
  *
  * Dedicated ripped rigs (not the player's own car) — length is the model's
  * longest raw dimension (they're all authored nose/tail along Z), so scaling
@@ -32,10 +32,12 @@ const VEHICLES = {
 // Weighted mix — mostly sedans, the occasional truck or bus.
 const TYPES = [VEHICLES.sedan, VEHICLES.sedan, VEHICLES.sedan, VEHICLES.tractor, VEHICLES.sedan, VEHICLES.sedan, VEHICLES.longnose, VEHICLES.sedan, VEHICLES.bus]
 
+const BACK = -60
+const FWD = 900
+const SPAN = FWD - BACK
 const TRAFFIC_N = 16
 const LANES = [-8.5, -6, -3.5, 3.5, 6, 8.5]   // both sides of the centre line
 const LANE_JITTER = 1
-const RESPAWN_AHEAD = 350   // m ahead of the player a wrecked car re-enters
 
 const noise = (i, seed) => (Math.sin(i * seed + seed) + 1) / 2
 
@@ -43,18 +45,16 @@ const DEFS = Array.from({ length: TRAFFIC_N }, (_, i) => {
     const type = TYPES[i % TYPES.length]
     return {
         type,
-        s0: (i / TRAFFIC_N) * track.length + (noise(i, 1.7) - 0.5) * 40,
+        z0: BACK + (i / TRAFFIC_N) * SPAN + (noise(i, 1.7) - 0.5) * 40,
         x: LANES[i % LANES.length] + (noise(i, 3.3) - 0.5) * LANE_JITTER,
         speed: type.speed[0] + noise(i, 5.1) * (type.speed[1] - type.speed[0]),
     }
 })
 
-// Per-car (x, s, halfLen, halfWidth) snapshot, kept live by each TrafficCar
-// below — SunsetScene reads this every frame to check the player against it.
-export const trafficBoxes = DEFS.map((d) => ({ x: d.x, s: d.s0, halfLen: d.type.len / 2, halfWidth: d.type.halfWidth, big: !!d.type.big, smash: false }))
-
-const _p = new THREE.Vector3()
-const _l = new THREE.Vector3()
+// Per-car (x, z, halfLen, halfWidth) snapshot, kept live by each TrafficCar
+// below — SunsetScene reads this every frame to check the player against it,
+// the same "mutable bridge, no re-render" pattern as `drive`/`session`.
+export const trafficBoxes = DEFS.map((d) => ({ x: d.x, z: d.z0, halfLen: d.type.len / 2, halfWidth: d.type.halfWidth, big: !!d.type.big, smash: false }))
 
 export function Traffic() {
     return DEFS.map((def, i) => <TrafficCar key={i} def={def} index={i} />)
@@ -63,7 +63,7 @@ export function Traffic() {
 function TrafficCar({ def, index }) {
     const { scene } = useGLTF(def.type.path)
     const groupRef = useRef(null)
-    const s = useRef(def.s0)
+    const z = useRef(def.z0)
     const smash = useRef(null)   // {t, vy, spinX, spinZ} while a wrecked car is tumbling
 
     const root = useMemo(() => {
@@ -85,8 +85,8 @@ function TrafficCar({ def, index }) {
         if (!g) return
 
         // Rammed by the player (flagged via the shared box): launch this car into
-        // a quick tumble where it sits, then respawn it fresh far ahead of the
-        // player in its lane.
+        // a quick tumble, keep sliding it past the camera, then respawn it fresh
+        // far ahead in its lane.
         if (box.smash && !smash.current) {
             smash.current = { t: 0, vy: 8 + Math.random() * 4, spinX: (Math.random() - 0.5) * 16, spinZ: (Math.random() - 0.5) * 12 }
         }
@@ -94,28 +94,31 @@ function TrafficCar({ def, index }) {
             const sm = smash.current
             sm.t += dt
             sm.vy -= 26 * dt
-            g.position.y = Math.max(-6, g.position.y + sm.vy * dt)
+            z.current -= (drive.kmh / 3.6) * dt
+            g.position.set(def.x, Math.max(-6, g.position.y + sm.vy * dt), z.current)
             g.rotation.x += sm.spinX * dt
             g.rotation.z += sm.spinZ * dt
+            box.z = z.current
             if (sm.t > 0.9) {
-                s.current = track.wrap(drive.s + RESPAWN_AHEAD + Math.random() * 120)
-                g.rotation.set(0, track.yawAtS(s.current), 0)
-                track.pointAtS(s.current, _p)
-                track.leftAtS(s.current, _l)
-                g.position.set(_p.x + _l.x * def.x, 0, _p.z + _l.z * def.x)
-                box.s = s.current
+                z.current = FWD - Math.random() * 120
+                g.rotation.set(0, 0, 0)
+                g.position.set(def.x, 0, z.current)
+                box.z = z.current
                 box.smash = false
                 smash.current = null
             }
             return
         }
 
-        if (session.started) s.current = track.wrap(s.current + def.speed * dt)
-        box.s = s.current
-        track.pointAtS(s.current, _p)
-        track.leftAtS(s.current, _l)
-        g.position.set(_p.x + _l.x * def.x, 0, _p.z + _l.z * def.x)
-        g.rotation.set(0, track.yawAtS(s.current), 0)
+        if (session.started) {
+            const closing = drive.kmh / 3.6 - def.speed
+            let nz = z.current - closing * dt
+            if (nz < BACK) nz += SPAN
+            if (nz > FWD) nz -= SPAN
+            z.current = nz
+        }
+        box.z = z.current
+        g.position.set(def.x, 0, z.current)
     })
 
     return <group ref={groupRef}><primitive object={root} /></group>
