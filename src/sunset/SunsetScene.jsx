@@ -54,8 +54,6 @@ const SMASH_BOOST = 28       // unused; kept for compatibility
  */
 const CAMS = [
     { name: 'CHASE',  lag: 0.6, follow: 3,  height: 2.8,  back: -7.2, lookXMul: 0.4, lookY: 1.35, lookZ: 32, fov: 64 },
-    { name: 'NEAR',   lag: 0.7, follow: 4,  height: 1.9,  back: -6.8, lookXMul: 0.5, lookY: 1.1,  lookZ: 30, fov: 70 },
-    { name: 'BONNET', lag: 1.0, follow: 12, height: 1.05, back: 2.2,  lookXMul: 1.0, lookY: 1.15, lookZ: 60, fov: 82 },
 ]
 
 export function SunsetScene() {
@@ -135,7 +133,7 @@ export function SunsetScene() {
     }), [palmScene, palms])
 
     const dummy = useMemo(() => new THREE.Object3D(), [])
-    const state = useRef({ carX: 0, carZ: 0, heading: 0, targetHeading: 0, steerAngle: 0, drift: 0, speed: 0, spin: 0, camX: 0, cam: 1, prevV: false, paint: 0, prevC: false, netT: 0, shake: 0, hitCooldown: [], crashes: 0, nearMisses: 0, nearMissTracked: {}, nearMissBoostTime: 0 })
+    const state = useRef({ carX: 0, carZ: 0, heading: 0, targetHeading: 0, steerAngle: 0, drift: 0, speed: 0, spin: 0, camX: 0, cam: 0, prevV: false, paint: 0, prevC: false, netT: 0, shake: 0, hitCooldown: [], crashes: 0, nearMisses: 0, nearMissTracked: {}, nearMissBoostTime: 0 })
 
     useFrame((_, delta) => {
         const dt = Math.min(delta, 0.05)
@@ -346,11 +344,8 @@ export function SunsetScene() {
             }
         }
 
-        // Camera: cycle presets on V (edge-detected), then place it. Hard cuts.
-        if (keys.KeyV && !s.prevV) s.cam = (s.cam + 1) % CAMS.length
-        s.prevV = !!keys.KeyV
-        const C = CAMS[s.cam]
         // Fixed chase cam: only tracks the car's lateral drift, no song-driven motion.
+        const C = CAMS[0]
         s.camX += (s.carX * C.lag - s.camX) * Math.min(1, dt * C.follow)
         // Hit shake: brief scattered jitter when you scrape traffic.
         s.shake = THREE.MathUtils.damp(s.shake, 0, 6, dt)
