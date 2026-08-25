@@ -12,3 +12,7 @@ npm-debug.log*
 .DS_Store
 .vscode/
 .idea/
+
+# Raw ripped map parts (large binaries). The optimized versions in
+# static/models/maps/opt/ are committed and are what the app loads.
+static/models/maps/*.glb

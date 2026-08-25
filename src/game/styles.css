@@ -1,0 +1,130 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; overflow: hidden; }
+body {
+    background: #0d0d14;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+canvas { outline: none; display: block; }
+
+/* ── HUD ─────────────────────────────────────────────────────────────────── */
+.hud {
+    position: fixed; inset: 0; pointer-events: none; color: #fff;
+    opacity: 0; transition: opacity .35s ease;
+}
+.hud.is-visible { opacity: 1; }
+
+.minimap {
+    position: absolute; top: 24px; left: 24px;
+    width: 190px; height: 190px;
+    background: rgba(12, 12, 18, 0.55);
+    border: 2px solid rgba(255, 196, 0, 0.35);
+    border-radius: 10px; padding: 8px;
+    backdrop-filter: blur(3px);
+}
+
+.hud-speed {
+    position: absolute; right: 36px; bottom: 30px;
+    display: flex; align-items: baseline; gap: 6px;
+    text-shadow: 0 2px 14px rgba(0,0,0,.6); font-variant-numeric: tabular-nums;
+}
+.hud-speed b { font-size: 64px; font-weight: 700; letter-spacing: -.02em; line-height: 1; }
+.hud-speed span { font-size: 15px; font-weight: 600; letter-spacing: .08em; opacity: .8; }
+
+.boost {
+    position: absolute; right: 36px; bottom: 108px; width: 220px; height: 10px;
+    background: rgba(255,255,255,.14); border-radius: 5px; overflow: hidden;
+}
+.boost i {
+    display: block; height: 100%; width: 100%;
+    background: linear-gradient(90deg, #ff9a2e, #ff4e16);
+    transform-origin: left; transform: scaleX(1); border-radius: 5px;
+}
+.boost.is-active i { background: linear-gradient(90deg, #ffd12e, #ff7a16); box-shadow: 0 0 14px #ff7a16; }
+
+.crash-banner {
+    position: absolute; top: 34%; left: 0; right: 0; text-align: center;
+    font-size: 72px; font-weight: 800; letter-spacing: .14em; font-style: italic;
+    color: #ff5a1f; text-shadow: 0 4px 30px rgba(0,0,0,.8);
+    opacity: 0; transition: opacity .12s ease;
+}
+.crash-banner.is-visible { opacity: 1; }
+
+.hint {
+    position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%);
+    font-size: 13px; letter-spacing: .04em; padding: 9px 16px;
+    background: rgba(0,0,0,.5); border-radius: 6px; white-space: nowrap; color: #fff;
+}
+.hint b { letter-spacing: .1em; }
+
+.loading {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%,-50%);
+    color: #fff; font-size: 14px; letter-spacing: .05em; padding: 10px 18px;
+    background: rgba(0,0,0,.4); border-radius: 6px;
+}
+
+/* ── Car select (garage) ─────────────────────────────────────────────────── */
+.garage {
+    position: fixed; inset: 0; color: #fff; z-index: 5;
+    font-family: 'Arial Narrow', 'Haettenschweiler', Impact, sans-serif;
+    opacity: 1; transition: opacity .35s ease;
+}
+.garage.is-hidden { opacity: 0; pointer-events: none; }
+
+.garage__bar {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    padding: 16px 26px 18px;
+    background: linear-gradient(180deg, rgba(12,10,8,.94), rgba(12,10,8,.55) 78%, transparent);
+    border-bottom: 2px solid rgba(255,196,0,.35);
+}
+.garage__title { display: flex; align-items: center; gap: 14px; }
+.garage__hazard {
+    width: 16px; height: 58px; flex: none;
+    background: repeating-linear-gradient(-45deg, #ffc400 0 8px, #1a1a1a 8px 16px);
+}
+.garage__title h1 {
+    font-size: 46px; line-height: .92; letter-spacing: .02em; font-weight: 900;
+    text-transform: uppercase; text-shadow: 0 3px 10px rgba(0,0,0,.7);
+}
+.garage__title p { font-size: 17px; letter-spacing: .16em; color: #d8d2c4; margin-top: 3px; }
+.garage__rank { text-align: right; }
+.garage__rank span { font-size: 21px; letter-spacing: .1em; color: #ff4438; font-weight: 800; }
+.garage__rank b {
+    display: block; font-size: 40px; line-height: .95; color: #ffc400;
+    font-style: italic; text-shadow: 0 3px 10px rgba(0,0,0,.7);
+}
+
+.garage__stats { position: absolute; top: 132px; left: 34px; }
+.garage__stats h2 {
+    font-size: 40px; font-weight: 900; letter-spacing: .01em;
+    text-transform: uppercase; text-shadow: 0 3px 12px rgba(0,0,0,.8);
+}
+.garage__stat { margin-top: 20px; }
+.garage__stat span {
+    display: block; font-size: 19px; letter-spacing: .11em; color: #efe9dc;
+    text-transform: uppercase; text-shadow: 0 2px 8px rgba(0,0,0,.8);
+}
+.garage__stat b {
+    font-size: 27px; color: #ffc400; letter-spacing: .04em; font-weight: 800;
+    text-shadow: 0 2px 8px rgba(0,0,0,.8);
+}
+
+.garage__picker {
+    position: absolute; left: 50%; bottom: 74px; transform: translateX(-50%);
+    display: flex; align-items: stretch; gap: 0; min-width: 620px;
+    background: linear-gradient(180deg, rgba(30,24,12,.9), rgba(12,10,8,.9));
+    border: 2px solid #ffc400; border-radius: 3px; pointer-events: auto;
+}
+.garage__arrow {
+    width: 56px; display: grid; place-items: center; cursor: pointer;
+    background: repeating-linear-gradient(-45deg, #ffc400 0 8px, #1a1a1a 8px 16px);
+    color: #1a1a1a; font-size: 22px; border: none;
+}
+.garage__names { flex: 1; display: flex; align-items: center; justify-content: center; gap: 30px; padding: 12px 22px; }
+.garage__name { font-size: 24px; letter-spacing: .07em; text-transform: uppercase; color: #8d867a; white-space: nowrap; }
+.garage__name.is-active { color: #fff; font-weight: 800; text-shadow: 0 0 14px rgba(255,196,0,.6); }
+
+.garage__footer {
+    position: absolute; left: 0; right: 0; bottom: 26px; text-align: center;
+    font-size: 16px; letter-spacing: .12em; color: #ded8ca; text-transform: uppercase;
+}
+.garage__footer b { color: #ffc400; }

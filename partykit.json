@@ -1,0 +1,6 @@
+{
+  "$schema": "https://www.partykit.io/schema.json",
+  "name": "sunset-boulevard",
+  "main": "party/server.js",
+  "compatibilityDate": "2024-11-01"
+}
