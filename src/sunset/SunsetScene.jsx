@@ -33,9 +33,18 @@ const WHEELBASE = 2.7        // m — turning radius R = wheelbase / tan(steer)
 const MAX_STEER = 0.36       // rad at a standstill; shrinks quickly with speed
 const STEER_IN = 2.2         // the wheel cranks to lock slowly, like a real column
 const STEER_OUT = 1.8        // …and eases back to centre
-const HEADING_CAP = 0.42     // rad — gentle lane changes, never sideways
+const HEADING_CAP = 0.42     // rad — hard ceiling on nose angle (keeps low-speed agility)
+const LAT_MAX = 9            // m/s — max sideways slide; the master "steering feel" knob.
+                             // The heading cap is derived from this so a lane change crosses
+                             // the road at the same pace at 40 or 80 m/s. ~7 relaxed, ~12 loose.
 const HEADING_MASS = 5.5     // chassis inertia — heavier at speed means slower response
 const ALIGN_GRIP = 1.8       // hands off: the tyres realign the nose with the road
+// ── Drift feel: a visual tail-out slip angle that wakes up at speed ──────────
+const DRIFT_SPEED = 30       // m/s (~108 km/h) — drift only wakes up above this
+const DRIFT_MAX = 0.45       // rad — deepest tail-out slip angle (~26°)
+const DRIFT_IN = 3.2         // how fast the slide builds when you commit to a turn
+const DRIFT_OUT = 2.0        // …and how lazily it lets go (holds the slide a beat)
+const DRIFT_SCRUB = 9        // m/s² of speed bled off while sliding hard
 const ENGINE_POWER = 22       // m/s² at launch, falling off toward top speed
 const BRAKE_POWER = 32       // m/s² strong braking
 const COAST_DRAG = 2.8       // m/s² engine braking, plus a little aero drag
@@ -139,7 +148,7 @@ export function SunsetScene() {
         const dt = Math.min(delta, 0.05)
         const s = state.current
 
-        const braking = session.started && (keys.KeyS || keys.ArrowDown) && s.speed > 8
+        const braking = session.started && (keys.KeyS || keys.ArrowDown)
         if (brakeLightRef.current) {
             brakeLightRef.current.intensity = braking ? 16 : 1.2
             brakeLightRef.current.color.set(braking ? '#ff3b3b' : '#ffb173')
@@ -158,7 +167,9 @@ export function SunsetScene() {
             }
 
             const activeMarks = skidMarks.current.filter((mark) => mark.active)
-            if (braking && s.speed > 20) {
+            // Lay rubber under heavy braking OR while the tail is hung out in a drift.
+            const drifting = Math.abs(s.drift) > 0.18
+            if ((braking && s.speed > 20) || drifting) {
                 // Create marks from 4 wheels: front-left, front-right, rear-left, rear-right
                 const wheelOffset = 0.9  // half-width of car (where wheels are)
                 const frontZ = -2.8      // front wheel offset
@@ -211,11 +222,12 @@ export function SunsetScene() {
         // as the song builds, and the finale stretch pins the throttle.
         const prog = session.started ? musicState.progress : 0
         const throttling = session.started && (keys.KeyW || keys.ArrowUp)
-        if (throttling) {
+        // Brake wins over throttle: hold both and you slow down, like a real pedal box.
+        if (braking) {
+            s.speed = Math.max(0, s.speed - BRAKE_POWER * dt)
+        } else if (throttling) {
             // Engine power fades as you approach top speed — a real power curve.
             s.speed = Math.min(TOP_SPEED, s.speed + ENGINE_POWER * Math.max(0.12, 1 - s.speed / TOP_SPEED) * dt)
-        } else if (braking) {
-            s.speed = Math.max(0, s.speed - BRAKE_POWER * dt)
         } else {
             s.speed = Math.max(0, s.speed - (COAST_DRAG + s.speed * 0.012) * dt)
         }
@@ -224,9 +236,9 @@ export function SunsetScene() {
         // sets a turning radius, which rotates the heading; the car then moves
         // where the nose points. Left (A/←) steers toward +x (screen-left).
         const steerInput = ((keys.KeyA || keys.ArrowLeft) ? 1 : 0) - ((keys.KeyD || keys.ArrowRight) ? 1 : 0)
-        // Less lock at speed (stability) — denominator reduced to 12 for slower turns at speed
-        // Apply steering sensitivity multiplier (0.3–2.0x) to control responsiveness
-        const steerLock = (MAX_STEER / (1 + s.speed / 12)) * settings.steeringSensitivity
+        // Less lock at speed (stability) — the front wheels can't crank as far the
+        // faster you go, like a real speed-sensitive steering rack.
+        const steerLock = MAX_STEER / (1 + s.speed / 12)
         const steerTarget = steerInput * steerLock
         s.steerAngle = THREE.MathUtils.damp(s.steerAngle, steerTarget, steerInput ? STEER_IN : STEER_OUT, dt)
 
@@ -234,7 +246,14 @@ export function SunsetScene() {
         // carries inertia: the nose follows the wheels' command with weight,
         // so the car leans into a turn instead of snapping like a bicycle.
         const yawRate = (s.speed / WHEELBASE) * Math.tan(s.steerAngle)
-        s.targetHeading = THREE.MathUtils.clamp(s.targetHeading + yawRate * dt, -HEADING_CAP, HEADING_CAP)
+        // Cap the *lateral velocity* (speed·sin heading), not the nose angle, so a
+        // lane change slides across the road at the same pace at any speed — that's
+        // the quantity the eye reads as "steering speed". The sensitivity slider
+        // (0.3–2.0×) scales this budget; below ~latMax/sin(HEADING_CAP) the fixed
+        // angle cap wins, keeping the car nimble at low speed.
+        const latMax = LAT_MAX * settings.steeringSensitivity
+        const capDyn = Math.min(HEADING_CAP, Math.asin(Math.min(0.99, latMax / Math.max(s.speed, 1))))
+        s.targetHeading = THREE.MathUtils.clamp(s.targetHeading + yawRate * dt, -capDyn, capDyn)
         // Hands off: grip walks the nose back parallel to the road.
         if (steerInput === 0) s.targetHeading = THREE.MathUtils.damp(s.targetHeading, 0, ALIGN_GRIP, dt)
         s.heading = THREE.MathUtils.damp(s.heading, s.targetHeading, HEADING_MASS, dt)
@@ -248,8 +267,15 @@ export function SunsetScene() {
             s.targetHeading = THREE.MathUtils.damp(s.targetHeading, 0, 8, dt)
             s.heading = THREE.MathUtils.damp(s.heading, 0, 8, dt)
         }
-        // Boost drift: rear steps out visually (kept for the arcade feel).
-        s.drift = THREE.MathUtils.damp(s.drift, 0, 7.2, dt)
+        // ── Drift: at speed, hard cornering slips the tail out. Kinematic, so this
+        // is a visual slip angle (rad) layered on the travel heading — the nose
+        // points further into the corner than the car is actually going. It ramps
+        // in above DRIFT_SPEED, deepens with steering, holds a beat when you ease
+        // off, and bleeds a little speed like real tyres scrubbing.
+        const driftReady = THREE.MathUtils.clamp((s.speed - DRIFT_SPEED) / 18, 0, 1)
+        const driftTarget = steerInput * driftReady * DRIFT_MAX
+        s.drift = THREE.MathUtils.damp(s.drift, driftTarget, steerInput ? DRIFT_IN : DRIFT_OUT, dt)
+        if (Math.abs(s.drift) > 0.12) s.speed = Math.max(0, s.speed - Math.abs(s.drift) * DRIFT_SCRUB * dt)
 
         // Traffic: detect collisions (crashes) and near misses
         if (session.started) {
@@ -307,8 +333,11 @@ export function SunsetScene() {
         const lateralG = yawRate * s.speed
         if (carRef.current) {
             carRef.current.position.set(s.carX, 0, s.carZ)
-            carRef.current.rotation.z = THREE.MathUtils.damp(carRef.current.rotation.z, THREE.MathUtils.clamp(lateralG * 0.004, -0.12, 0.12) - s.drift * 0.05, 9, dt)
-            carRef.current.rotation.y = s.heading + s.drift * 0.12
+            // Body roll: lean with the cornering g, and lean harder into a drift so
+            // the chassis visibly rolls onto its outside wheels while the tail is out.
+            const lean = THREE.MathUtils.clamp(lateralG * 0.005, -0.12, 0.12) + s.drift * 0.22
+            carRef.current.rotation.z = THREE.MathUtils.damp(carRef.current.rotation.z, lean, 8, dt)
+            carRef.current.rotation.y = s.heading + s.drift
             carRef.current.rotation.x = THREE.MathUtils.damp(carRef.current.rotation.x, 0, 6, dt)
         }
         // Wheels: all roll; the front pair also shows the steering angle.

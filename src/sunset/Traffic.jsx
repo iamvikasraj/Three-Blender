@@ -20,12 +20,13 @@ import { session } from './session.js'
  * by `len` keeps a bus reading as bus-sized next to a truck. `halfWidth` feeds
  * SunsetScene's collision check.
  */
-// All vehicles are heavy obstacles — clipping one scrapes your speed off,
-// so you want to dodge them. They crawl along slow so you blow past them.
+// All vehicles are heavy obstacles — clipping one scrapes your speed off, so you
+// want to dodge them. They run at highway speed; you still overtake, but the
+// closing speed is lower so they read as fast-moving traffic, not parked cones.
 const VEHICLES = {
-    tractor: { path: '/models/traffic%20cars/tractor_cab_traffic_burnout_3.glb', len: 6.4, halfWidth: 1.3, modelYaw: 0, speed: [8, 18], big: true },
-    longnose: { path: '/models/traffic%20cars/longnose_cab_traffic_burnout_3.glb', len: 7.2, halfWidth: 1.35, modelYaw: 0, speed: [9, 17], big: true },
-    bus: { path: '/models/traffic%20cars/city_bus_traffic_burnout_3.glb', len: 11, halfWidth: 1.45, modelYaw: 0, speed: [7, 15], big: true },
+    tractor: { path: '/models/traffic%20cars/tractor_cab_traffic_burnout_3.glb', len: 6.4, halfWidth: 1.3, modelYaw: 0, speed: [18, 28], big: true },
+    longnose: { path: '/models/traffic%20cars/longnose_cab_traffic_burnout_3.glb', len: 7.2, halfWidth: 1.35, modelYaw: 0, speed: [20, 30], big: true },
+    bus: { path: '/models/traffic%20cars/city_bus_traffic_burnout_3.glb', len: 11, halfWidth: 1.45, modelYaw: 0, speed: [16, 26], big: true },
 }
 // Trucks and buses only — heavy obstacles to dodge.
 const TYPES = [VEHICLES.tractor, VEHICLES.longnose, VEHICLES.tractor, VEHICLES.bus, VEHICLES.longnose, VEHICLES.tractor]
