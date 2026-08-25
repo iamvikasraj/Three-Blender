@@ -193,6 +193,8 @@ function Hud() {
     const nearMisses = useRef(null)
     const distance = useRef(null)
     const bestScore = useRef(null)
+    const avgSpeed = useRef(null)
+    const distanceTravelled = useRef(null)
     const [tool, setTool] = useState(null) // 'audio' | 'controls' | null
     const toggle = (name) => setTool((t) => (t === name ? null : name))
     useEffect(() => {
@@ -209,6 +211,11 @@ function Hud() {
             if (nearMisses.current) nearMisses.current.textContent = drive.nearMisses
             if (distance.current) distance.current.textContent = `${drive.distance.toFixed(1)} km`
             if (bestScore.current) bestScore.current.textContent = `${drive.bestScore.toFixed(1)} km`
+            if (avgSpeed.current && drive.time > 0) {
+                const avgSpeedKmh = Math.round((drive.distance * 1000 / drive.time) * 3.6)
+                avgSpeed.current.textContent = `${avgSpeedKmh} km/h`
+            }
+            if (distanceTravelled.current) distanceTravelled.current.textContent = `${drive.distance.toFixed(1)} km`
             raf = requestAnimationFrame(loop)
         }
         raf = requestAnimationFrame(loop)
@@ -235,6 +242,17 @@ function Hud() {
                         <span className="sunset-stat__value" ref={nearMisses}>0</span>
                     </div>
                 </div>
+            </div>
+
+            <div className="sunset-bottom-stats">
+               <div className="sunset-bottom-left">
+                   <span className="sunset-stat__label">AVG SPEED</span>
+                   <span className="sunset-stat__value" ref={avgSpeed}>0 km/h</span>
+               </div>
+               <div className="sunset-bottom-right">
+                   <span className="sunset-stat__label">DISTANCE</span>
+                   <span className="sunset-stat__value" ref={distanceTravelled}>0.0 km</span>
+               </div>
             </div>
 
             <div className="sunset-tools" onMouseLeave={() => setTool(null)}>

@@ -208,6 +208,21 @@ canvas { display: block; width: 100%; height: 100%; outline: none; }
     text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6); min-width: 32px; text-align: center;
 }
 
+/* Bottom stats — average speed (left) and distance (right) */
+.sunset-bottom-stats {
+    position: absolute; bottom: 24px; left: 0; right: 0; width: 100%;
+    display: flex; justify-content: space-between; padding: 0 22px;
+    font-family: 'Press Start 2P', monospace; font-size: 8px;
+    color: rgba(255, 255, 255, 0.6); pointer-events: none;
+}
+.sunset-bottom-left, .sunset-bottom-right {
+    display: flex; flex-direction: column; gap: 4px; align-items: flex-start;
+}
+.sunset-bottom-right {
+    align-items: flex-end;
+}
+
+
 /* Boost meter (above the speedo) */
 .sunset-controls b { color: #8fe0bd; }
 .sunset-best-title { font-size: 10px; color: #ffe08a; margin-top: 16px; letter-spacing: 0.08em; }
