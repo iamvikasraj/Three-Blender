@@ -52,7 +52,7 @@ npm run build
 | `animation.autoPlay` | Auto-play a clip if the model has animations. |
 | `animation.clip` | Which clip to play by default — index (`0`) or name (`"Run"`). |
 | `scene.background` / `showFloor` / `showGrid` / `autoRotate` | Scene appearance defaults. |
-| `camera.fov` / `camera.autoFrame` | Camera field of view and auto-framing. |
+| `camera.type` / `camera.fov` / `camera.zoom` / `camera.autoFrame` | Camera type (`'perspective'` / `'orthographic'`), field of view (perspective), zoom (orthographic), and auto-framing. |
 
 ## On-screen controls
 

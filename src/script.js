@@ -27,14 +27,16 @@ const CONFIG = {
         clip: 0,        // index OR name of the clip to play by default
     },
     scene: {
-        background: '#2b2d31',
+        background: '#1a1c20',
         showFloor: true,
         showGrid: true,
-        autoRotate: false,
+        autoRotate: true,
     },
     camera: {
-        fov: 45,
-        autoFrame: true, // position the camera to frame the loaded model
+        type: 'orthographic', // 'perspective' or 'orthographic'
+        fov: 45,             // perspective only
+        zoom: 1,             // orthographic only (higher = closer)
+        autoFrame: true,     // position the camera to frame the loaded model
     },
 }
 
@@ -91,37 +93,49 @@ function clearCurrentModel() {
 }
 
 function frameModel(object) {
-    // Compute bounding box, then center / scale / seat on floor as configured.
+    // Compute bounding box for scaling
     const box = new THREE.Box3().setFromObject(object)
     const size = box.getSize(new THREE.Vector3())
-    const center = box.getCenter(new THREE.Vector3())
-
+ 
     if (CONFIG.model.autoScale) {
         const maxDim = Math.max(size.x, size.y, size.z) || 1
         object.scale.multiplyScalar(CONFIG.model.targetSize / maxDim)
     } else {
         object.scale.multiplyScalar(CONFIG.model.scale)
     }
-
+ 
+    // Compute final bounding box once after scaling (reuse for all subsequent operations)
+    const finalBox = new THREE.Box3().setFromObject(object)
+    const finalSize = finalBox.getSize(new THREE.Vector3())
+    const finalCenter = finalBox.getCenter(new THREE.Vector3())
+ 
     if (CONFIG.model.autoCenter) {
-        // Recompute after scaling
-        const box2 = new THREE.Box3().setFromObject(object)
-        const size2 = box2.getSize(new THREE.Vector3())
-        const center2 = box2.getCenter(new THREE.Vector3())
-        object.position.x += object.position.x - center2.x
-        object.position.z += object.position.z - center2.z
-        object.position.y += (size2.y / 2) - center2.y // rest bottom on the floor (y = 0)
+        object.position.x += object.position.x - finalCenter.x
+        object.position.z += object.position.z - finalCenter.z
+        object.position.y += (finalSize.y / 2) - finalCenter.y // rest bottom on the floor (y = 0)
     }
-
+ 
     // Frame the camera on the model
     if (CONFIG.camera.autoFrame) {
-        const box3 = new THREE.Box3().setFromObject(object)
-        const size3 = box3.getSize(new THREE.Vector3())
-        const center3 = box3.getCenter(new THREE.Vector3())
-        const maxDim = Math.max(size3.x, size3.y, size3.z) || 1
-        const dist = maxDim / (2 * Math.tan((camera.fov * Math.PI) / 360))
-        camera.position.set(center3.x + dist, center3.y + dist * 0.6, center3.z + dist * 1.4)
-        controls.target.copy(center3)
+        const maxDim = Math.max(finalSize.x, finalSize.y, finalSize.z) || 1
+        let dist
+        if (camera.isOrthographicCamera) {
+            // Size the ortho frustum to the model and fit with margin
+            const margin = 1.25
+            const aspect = sizes.width / sizes.height
+            const halfH = (maxDim / 2) * margin
+            camera.top = halfH
+            camera.bottom = -halfH
+            camera.left = -halfH * aspect
+            camera.right = halfH * aspect
+            camera.updateProjectionMatrix()
+            dist = maxDim * 3 // any sufficiently far distance; ortho has no perspective falloff
+        } else {
+            dist = maxDim / (2 * Math.tan((camera.fov * Math.PI) / 360))
+        }
+        // Low, cinematic three-quarter view — near eye level instead of top-down
+        camera.position.set(finalCenter.x + dist * 0.9, finalCenter.y + finalSize.y * 0.15, finalCenter.z + dist * 1.1)
+        controls.target.copy(finalCenter)
         controls.update()
     }
 }
@@ -189,7 +203,7 @@ scene.add(ambientLight)
 const directionalLight = new THREE.DirectionalLight(0xffffff, 2.2)
 directionalLight.position.set(5, 8, 5)
 directionalLight.castShadow = true
-directionalLight.shadow.mapSize.set(2048, 2048)
+directionalLight.shadow.mapSize.set(1024, 1024)
 directionalLight.shadow.camera.near = 0.5
 directionalLight.shadow.camera.far = 30
 directionalLight.shadow.camera.left = -10
@@ -199,6 +213,11 @@ directionalLight.shadow.camera.bottom = -10
 directionalLight.shadow.normalBias = 0.05
 scene.add(directionalLight)
 
+// Rim light — cool-tinted back light for edge definition and drama
+const rimLight = new THREE.DirectionalLight(0x88aaff, 1.5)
+rimLight.position.set(-6, 4, -6)
+scene.add(rimLight)
+
 /**
  * Sizes
  */
@@ -207,7 +226,14 @@ const sizes = { width: window.innerWidth, height: window.innerHeight }
 window.addEventListener('resize', () => {
     sizes.width = window.innerWidth
     sizes.height = window.innerHeight
-    camera.aspect = sizes.width / sizes.height
+    const aspect = sizes.width / sizes.height
+    if (camera.isPerspectiveCamera) {
+        camera.aspect = aspect
+    } else if (camera.isOrthographicCamera) {
+        const h = (camera.top - camera.bottom) / 2
+        camera.left = -h * aspect
+        camera.right = h * aspect
+    }
     camera.updateProjectionMatrix()
     renderer.setSize(sizes.width, sizes.height)
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
@@ -216,7 +242,12 @@ window.addEventListener('resize', () => {
 /**
  * Camera + Controls
  */
-const camera = new THREE.PerspectiveCamera(CONFIG.camera.fov, sizes.width / sizes.height, 0.1, 200)
+const aspect = sizes.width / sizes.height
+const camera = CONFIG.camera.type === 'orthographic'
+    ? new THREE.OrthographicCamera(-2 * aspect, 2 * aspect, 2, -2, 0.1, 200)
+    : new THREE.PerspectiveCamera(CONFIG.camera.fov, aspect, 0.1, 200)
+camera.zoom = CONFIG.camera.zoom ?? 1
+camera.updateProjectionMatrix()
 camera.position.set(4, 3, 6)
 scene.add(camera)
 
