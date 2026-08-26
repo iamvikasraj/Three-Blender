@@ -48,7 +48,7 @@ const DRIFT_SCRUB = 9        // m/s² of speed bled off while sliding hard
 const ENGINE_POWER = 22       // m/s² at launch, falling off toward top speed
 const BRAKE_POWER = 32       // m/s² strong braking
 const COAST_DRAG = 2.8       // m/s² engine braking, plus a little aero drag
-const DASH_PITCH = 16
+const DASH_PITCH = 11          // spacing of centre-line dashes (denser reads more continuous)
 const PALM_PITCH = 32          // spacing of roadside palm groups
 const PLAYER_HALF_W = 1.0    // player car collision half-extents (m)
 const PLAYER_HALF_L = 2.2
@@ -93,10 +93,56 @@ export function SunsetScene() {
     }, [scene])
 
     // ── Scrolling props: centre dashes ───────────────────────────────────────
-    const dashGeo = useMemo(() => { const g = new THREE.PlaneGeometry(0.5, 4); g.rotateX(-Math.PI / 2); return g }, [])
-    const dashMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#eef6ea' }), [])
+    const dashGeo = useMemo(() => { const g = new THREE.PlaneGeometry(0.7, 4.5); g.rotateX(-Math.PI / 2); return g }, [])
+    // transparent:true only to push the dashes into the post-reflection draw pass
+    // so the sun-glitter layer can't wash them out (they stay crisp on the road).
+    const dashMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#f4faf0', transparent: true }), [])
     const skidGeo = useMemo(() => { const g = new THREE.PlaneGeometry(0.3, 2.6); g.rotateX(-Math.PI / 2); return g }, [])
     const skidMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#0b0b12', transparent: true, opacity: 0.8 }), [])
+
+    // ── Sun reflection: a "glitter path" of the sun on the asphalt. It's a column
+    // centred under the sun that pinches toward the horizon (converging on the sun)
+    // and widens toward the car, broken into shimmering glints by scrolling value
+    // noise so it reads as light dancing on the road rather than a painted wash.
+    const reflectMat = useMemo(() => new THREE.ShaderMaterial({
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        uniforms: { uColor: { value: new THREE.Color('#ff8a3c') }, uTime: { value: 0 } },
+        vertexShader: /* glsl */`
+            varying vec2 vUv;
+            void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+        `,
+        fragmentShader: /* glsl */`
+            varying vec2 vUv; uniform vec3 uColor; uniform float uTime;
+            float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+            float vnoise(vec2 p){
+                vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+                float a = hash(i), b = hash(i + vec2(1.0, 0.0));
+                float c = hash(i + vec2(0.0, 1.0)), d = hash(i + vec2(1.0, 1.0));
+                return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+            }
+            void main() {
+                float y = vUv.y;                                   // 0 near car → 1 at the horizon
+                // Column pinched toward the sun, wide near the car.
+                float halfW = mix(0.55, 0.06, smoothstep(0.0, 1.0, y));
+                float cx = abs(vUv.x - 0.5) / max(halfW, 0.001);
+                float column = smoothstep(1.0, 0.0, cx);
+                // Bright at the sun's base, easing out toward the car; the very top
+                // fades so it never smears a hard edge into the horizon line.
+                float bright = smoothstep(0.02, 0.4, y) * (1.0 - smoothstep(0.9, 1.0, y));
+                // Glints: chunky value noise (survives the pixelation), finer toward
+                // the sun, scrolling toward the car so the road appears to rush beneath.
+                vec2 np = vec2(vUv.x * 8.0, y * (10.0 + y * 16.0) - uTime * 2.4);
+                float g = vnoise(np) * (0.65 + 0.55 * vnoise(np * 2.1 + 11.0));
+                float glint = smoothstep(0.30, 0.60, g);
+                // Warmer/whiter near the sun, deeper orange lower down.
+                vec3 col = mix(uColor, vec3(1.0, 0.88, 0.66), smoothstep(0.45, 1.0, y));
+                float a = column * bright * (0.30 + 1.35 * glint);
+                gl_FragColor = vec4(col, a * 0.62);
+            }
+        `,
+    }), [])
     const dashN = Math.ceil((FWD - BACK) / DASH_PITCH)
     const dashZ = useMemo(() => Array.from({ length: dashN }, (_, i) => BACK + i * DASH_PITCH), [dashN])
     const skidMarks = useRef(Array.from({ length: 88 }, () => ({ active: false, x: 0, z: -2, rot: 0, life: 0, wheelPos: 0 })))
@@ -147,6 +193,7 @@ export function SunsetScene() {
     useFrame((_, delta) => {
         const dt = Math.min(delta, 0.05)
         const s = state.current
+        reflectMat.uniforms.uTime.value += dt
 
         const braking = session.started && (keys.KeyS || keys.ArrowDown)
         if (brakeLightRef.current) {
@@ -432,13 +479,18 @@ export function SunsetScene() {
                 <planeGeometry args={[ROAD_W, 1800]} />
                 <meshStandardMaterial color="#34364d" roughness={0.92} />
             </mesh>
+            {/* Sun reflection shimmer, mirrored down the centre of the road (drawn
+                before the dashes so it can't wash the centre line) */}
+            <mesh material={reflectMat} renderOrder={-1} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 430]}>
+                <planeGeometry args={[7, 820]} />
+            </mesh>
             {[-1, 1].map((sgn) => (
                 <mesh key={sgn} rotation={[-Math.PI / 2, 0, 0]} position={[sgn * (ROAD_W / 2 - 0.5), 0.01, 700]}>
                     <planeGeometry args={[0.3, 1800]} />
                     <meshBasicMaterial color="#ffb35e" />
                 </mesh>
             ))}
-            <instancedMesh ref={dashRef} args={[dashGeo, dashMat, dashN]} frustumCulled={false} />
+            <instancedMesh ref={dashRef} args={[dashGeo, dashMat, dashN]} renderOrder={2} frustumCulled={false} />
             <group ref={palmGroupRef}>
                 {palmTrees.map((tree, i) => <primitive key={i} object={tree} />)}
             </group>

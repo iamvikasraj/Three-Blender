@@ -142,6 +142,13 @@ canvas { display: block; width: 100%; height: 100%; outline: none; }
 .sunset-lobby b { color: #8fe0bd; }
 .sunset-lobby .is-ready { color: #8fe0bd; }
 .sunset-controls { font-size: 9px; opacity: 0.75; margin-top: 40px; letter-spacing: 0.03em; }
+.sunset-tribute {
+    position: absolute; left: 0; right: 0; bottom: 22px;
+    font-size: 8px; line-height: 2.1; letter-spacing: 0.08em;
+    color: #ffb98a; opacity: 0.82; text-shadow: 0 0 12px rgba(255, 140, 80, 0.35);
+}
+.sunset-tribute b { color: #ffd0a0; }
+.sunset-tribute span { display: block; margin-top: 8px; font-size: 7px; color: #c9d9d0; opacity: 0.6; }
 
 /* Lap counter — under the brand, same quiet treatment */
 .sunset-lap {

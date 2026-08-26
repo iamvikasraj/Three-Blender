@@ -181,6 +181,10 @@ function Title({ onStart }) {
             <p className="sunset-controls">
                 <b>W</b> ACCELERATE &middot; <b>A</b> <b>D</b> STEER &middot; <b>SHIFT</b> BOOST &middot; <b>V</b> CAM &middot; <b>M</b> MUTE
             </p>
+            <p className="sunset-tribute">
+                A tribute to <b>PHIL COLLINS</b> &mdash; &ldquo;In the Air Tonight&rdquo;
+                <span>a fan project &middot; made with love, not for profit</span>
+            </p>
         </div>
     )
 }
