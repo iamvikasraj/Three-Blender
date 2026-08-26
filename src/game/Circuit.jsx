@@ -8,11 +8,12 @@ import { CIRCUIT } from './constants.js'
 import { findRoadSurface, findSpawnOnRoad } from './circuitAnalysis.js'
 
 /**
- * The real Burnout Revenge "Eternal City" circuit. The map's geometry is baked
- * in world space, so it becomes ONE static trimesh collider — roads, kerbs,
- * walls and buildings all collide (that's what the wall-scrape mechanic and
- * containment rely on). We auto-scale it to real metres, then hand back a road
- * spawn found geometrically (circuitAnalysis).
+ * The real Burnout Revenge "Eternal City" circuit (or a ripped map split across
+ * several GLBs — CIRCUIT.path can be a single path or an array to load-and-merge).
+ * The map's geometry is baked in world space, so it becomes ONE static trimesh
+ * collider — roads, kerbs, walls and buildings all collide (that's what the
+ * wall-scrape mechanic and containment rely on). We auto-scale it to real
+ * metres, then hand back a road spawn found geometrically (circuitAnalysis).
  *
  * The optimized export is Meshopt-compressed, so we configure the GLTFLoader
  * with the official MeshoptDecoder explicitly (matching the vanilla build) —
@@ -27,9 +28,26 @@ import { findRoadSurface, findSpawnOnRoad } from './circuitAnalysis.js'
 const NON_COLLIDING = /^backdrop/i
 
 export function Circuit({ onSpawn }) {
-    const { scene } = useLoader(GLTFLoader, CIRCUIT.path, (loader) => {
+    const paths = Array.isArray(CIRCUIT.path) ? CIRCUIT.path : [CIRCUIT.path]
+    const gltfs = useLoader(GLTFLoader, paths, (loader) => {
         loader.setMeshoptDecoder(MeshoptDecoder)
     })
+    const results = Array.isArray(gltfs) ? gltfs : [gltfs]
+    // Merge every part's scene under one root — they're baked in the same
+    // world space, so stitching them here just reunites the split streets.
+    const scene = useMemo(() => {
+        const root = new THREE.Group()
+        for (let i = 0; i < results.length; i++) {
+            const g = results[i]
+            g.scene.updateMatrixWorld(true)
+            const box = new THREE.Box3().setFromObject(g.scene)
+            const size = box.getSize(new THREE.Vector3())
+            const center = box.getCenter(new THREE.Vector3())
+            console.log(`[PART ${i}] ${paths[i].split('/').pop()} size=(${size.x.toFixed(0)},${size.y.toFixed(0)},${size.z.toFixed(0)}) center=(${center.x.toFixed(0)},${center.y.toFixed(0)},${center.z.toFixed(0)}) meshes=${g.scene.children.length}`)
+            root.add(g.scene)
+        }
+        return root
+    }, [results])
     const { world, rapier } = useRapier()
 
     const spawn = useMemo(() => {
@@ -83,9 +101,24 @@ export function Circuit({ onSpawn }) {
                 .setRestitution(0.05),
             body,
         )
+
+        // Imported road meshes can contain small gaps. Keep an invisible floor
+        // below the city so a missed triangle cannot send the car into the void.
+        const bounds = new THREE.Box3().setFromObject(scene)
+        const size = bounds.getSize(new THREE.Vector3())
+        const floor = world.createRigidBody(rapier.RigidBodyDesc.fixed())
+        world.createCollider(
+            rapier.ColliderDesc.cuboid(size.x / 2 + 20, 1, size.z / 2 + 20)
+                .setTranslation(bounds.getCenter(new THREE.Vector3()).x, bounds.min.y - 3, bounds.getCenter(new THREE.Vector3()).z)
+                .setFriction(1),
+            floor,
+        )
         console.log(`[CIRCUIT] collider: 1 merged trimesh, ${indices.length / 3} tris (backdrop excluded)`)
 
-        return () => { try { world.removeRigidBody(body) } catch { /* already gone */ } }
+        return () => {
+            try { world.removeRigidBody(body) } catch { /* already gone */ }
+            try { world.removeRigidBody(floor) } catch { /* already gone */ }
+        }
     }, [scene, world, rapier])
 
     return <primitive object={scene} />

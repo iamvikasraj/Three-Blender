@@ -25,6 +25,7 @@ export default {
             {
                 main: resolve(projectRoot, 'src/index.html'),      // Sunset Drive — endless PS1 cruise (React Three Fiber)
                 burnout: resolve(projectRoot, 'src/burnout.html'), // Burnout-style prototype (React Three Fiber)
+                mapdebug: resolve(projectRoot, 'src/mapdebug.html'), // Free-fly circuit inspector (no physics/car)
             },
         },
     },

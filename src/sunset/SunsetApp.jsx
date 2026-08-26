@@ -7,8 +7,9 @@ import { useKeyboard } from '../game/input.js'
 import { drive } from './hudState.js'
 import { session } from './session.js'
 import { musicState, setMusicVolume, setSfxVolume, startAudio, toggleMute } from './audio.js'
-import { lyricAt } from './lyrics.js'
+import { lyricWordsAt } from './lyrics.js'
 import { net, connect, ensureRoom, onRoster, rivalCount } from './net.js'
+import { settings, loadSettings, setSteeringSensitivity } from './settings.js'
 
 const km = (m) => `${(m / 1000).toFixed(1)} km`
 const NAME = 'RACER ' + Math.random().toString(36).slice(2, 5).toUpperCase()
@@ -89,6 +90,7 @@ export function SunsetApp() {
 
     // Single-player mode for now: no room connection or rival roster.
     useEffect(() => {
+        loadSettings()
         net.name = NAME
         net.room = 'solo'
         bumpVisitors()
@@ -133,19 +135,26 @@ export function SunsetApp() {
 
     return (
         <>
-            <Canvas
-                shadows
-                dpr={1}
-                gl={{ antialias: false, toneMapping: THREE.NoToneMapping }}
-                camera={{ fov: 68, near: 0.1, far: 3200, position: [0, 3.4, -9.5] }}
-            >
-                <Suspense fallback={null}>
-                    <SunsetScene />
-                </Suspense>
-            </Canvas>
+            <div className="sunset-stage">
+                <Canvas
+                    shadows
+                    dpr={1}
+                    gl={{ antialias: false, toneMapping: THREE.NoToneMapping }}
+                    camera={{ fov: 68, near: 0.1, far: 3200, position: [0, 3.4, -9.5] }}
+                >
+                    <Suspense fallback={null}>
+                        <SunsetScene />
+                    </Suspense>
+                </Canvas>
+            </div>
 
-            {phase === 'title' ? <Title onStart={begin} /> : <Hud />}
-            {phase === 'driving' && <Captions />}
+            <div className="sunset-letterbox sunset-letterbox--top" aria-hidden="true" />
+            <div className="sunset-letterbox sunset-letterbox--bottom" aria-hidden="true" />
+
+            <div className="sunset-ui-stage">
+                {phase === 'title' ? <Title onStart={begin} /> : <Hud />}
+                {phase === 'driving' && <Captions />}
+            </div>
             <div className={`sunset-fade ${fade ? 'is-black' : ''}`} />
             <Loading />
         </>
@@ -170,7 +179,11 @@ function Title({ onStart }) {
 
             <button className="sunset-start" onClick={onStart}>READY TO DRIVE</button>
             <p className="sunset-controls">
-                <b>A</b> <b>D</b> STEER &middot; <b>SHIFT</b> BOOST &middot; <b>V</b> CAM &middot; <b>C</b> PAINT &middot; <b>M</b> MUTE
+                <b>W</b> ACCELERATE &middot; <b>A</b> <b>D</b> STEER &middot; <b>SHIFT</b> BOOST &middot; <b>V</b> CAM &middot; <b>M</b> MUTE
+            </p>
+            <p className="sunset-tribute">
+                A tribute to <b>PHIL COLLINS</b> &mdash; &ldquo;In the Air Tonight&rdquo;
+                <span>a fan project &middot; made with love, not for profit</span>
             </p>
         </div>
     )
@@ -178,24 +191,35 @@ function Title({ onStart }) {
 
 function Hud() {
     const cam = useRef(null)
-    const paint = useRef(null)
     const gap = useRef(null)
-    const boost = useRef(null)
-    const boostFill = useRef(null)
+    const speed = useRef(null)
+    const crashes = useRef(null)
+    const nearMisses = useRef(null)
+    const distance = useRef(null)
+    const bestScore = useRef(null)
+    const avgSpeed = useRef(null)
+    const distanceTravelled = useRef(null)
     const [tool, setTool] = useState(null) // 'audio' | 'controls' | null
     const toggle = (name) => setTool((t) => (t === name ? null : name))
     useEffect(() => {
         let raf
         const loop = () => {
             if (cam.current) cam.current.textContent = drive.cam
-            if (paint.current) paint.current.textContent = drive.paint
             if (gap.current) {
                 if (drive.gap == null) gap.current.textContent = ''
                 else if (drive.gap >= 0) gap.current.textContent = `RIVAL AHEAD ${drive.gap} m`
                 else gap.current.textContent = `RIVAL BEHIND ${-drive.gap} m`
             }
-            if (boost.current) boost.current.textContent = `${Math.round(drive.boost * 100)}%`
-            if (boostFill.current) boostFill.current.style.width = `${Math.max(0, Math.min(100, drive.boost * 100))}%`
+            if (speed.current) speed.current.textContent = drive.kmh
+            if (crashes.current) crashes.current.textContent = drive.crashes
+            if (nearMisses.current) nearMisses.current.textContent = drive.nearMisses
+            if (distance.current) distance.current.textContent = `${drive.distance.toFixed(1)} km`
+            if (bestScore.current) bestScore.current.textContent = `${drive.bestScore.toFixed(1)} km`
+            if (avgSpeed.current && drive.time > 0) {
+                const avgSpeedKmh = Math.round((drive.distance * 1000 / drive.time) * 3.6)
+                avgSpeed.current.textContent = `${avgSpeedKmh} km/h`
+            }
+            if (distanceTravelled.current) distanceTravelled.current.textContent = `${drive.distance.toFixed(1)} km`
             raf = requestAnimationFrame(loop)
         }
         raf = requestAnimationFrame(loop)
@@ -207,16 +231,37 @@ function Hud() {
             <div className="sunset-brand" aria-label="Sunset Boulevard" title="Sunset Boulevard">
                 SUNSET BOULEVARD
             </div>
-            <div className="sunset-boost" aria-live="polite">
-                <span className="sunset-boost__label">BOOST</span>
-                <div className="sunset-boost__bar">
-                    <div className="sunset-boost__fill" ref={boostFill} />
+            <div className="sunset-dash" aria-live="polite">
+                <div className="sunset-dash__speedometer">
+                    <div className="sunset-stat sunset-stat--left">
+                        <span className="sunset-stat__label">CRASHES</span>
+                        <span className="sunset-stat__value" ref={crashes}>0</span>
+                    </div>
+                    <div className="sunset-dash__speed">
+                        <span className="sunset-dash__kmh" ref={speed}>0</span>
+                        <span className="sunset-dash__unit">KM/H</span>
+                    </div>
+                    <div className="sunset-stat sunset-stat--right">
+                        <span className="sunset-stat__label">NEAR MISS</span>
+                        <span className="sunset-stat__value" ref={nearMisses}>0</span>
+                    </div>
                 </div>
-                <span className="sunset-boost__value" ref={boost}>100%</span>
+            </div>
+
+            <div className="sunset-bottom-stats">
+               <div className="sunset-bottom-left">
+                   <span className="sunset-stat__label">AVG SPEED</span>
+                   <span className="sunset-stat__value" ref={avgSpeed}>0 km/h</span>
+               </div>
+               <div className="sunset-bottom-right">
+                   <span className="sunset-stat__label">DISTANCE</span>
+                   <span className="sunset-stat__value" ref={distanceTravelled}>0.0 km</span>
+               </div>
             </div>
 
             <div className="sunset-tools" onMouseLeave={() => setTool(null)}>
                 <div className="sunset-tools__bar">
+                    <div className="sunset-cam">CAM <b ref={cam}>CHASE</b></div>
                     <button className={`sunset-tools__btn ${tool === 'audio' ? 'is-active' : ''}`}
                         onMouseEnter={() => setTool('audio')} onClick={() => toggle('audio')}
                         aria-label="Audio mix" aria-expanded={tool === 'audio'}>
@@ -235,14 +280,29 @@ function Hud() {
                             <li><span className="sunset-keys__k"><b>A</b><b>D</b></span> STEER</li>
                             <li><span className="sunset-keys__k"><b>SHIFT</b></span> BOOST</li>
                             <li><span className="sunset-keys__k"><b>V</b></span> CAM</li>
-                            <li><span className="sunset-keys__k"><b>C</b></span> PAINT</li>
                             <li><span className="sunset-keys__k"><b>M</b></span> MUTE</li>
                         </ul>
+                        <div className="sunset-slider">
+                            <label htmlFor="steer-sens">STEERING SENSITIVITY</label>
+                            <div className="sunset-slider__container">
+                                <span className="sunset-slider__label">SLOW</span>
+                                <input 
+                                    id="steer-sens"
+                                    type="range" 
+                                    min="0.3" 
+                                    max="2.0" 
+                                    step="0.1"
+                                    defaultValue={settings.steeringSensitivity}
+                                    onChange={(e) => setSteeringSensitivity(Number(e.target.value))}
+                                    className="sunset-slider__input"
+                                />
+                                <span className="sunset-slider__label">FAST</span>
+                            </div>
+                            <div className="sunset-slider__value">{settings.steeringSensitivity.toFixed(1)}x</div>
+                        </div>
                     </div>
                 )}
             </div>
-
-            <div className="sunset-cam">CAM <b ref={cam}>CHASE</b> &middot; PAINT <b ref={paint}>BLUE</b></div>
         </div>
     )
 }
@@ -296,7 +356,8 @@ function Captions() {
         let raf
         let shown = null
         const loop = () => {
-            const line = lyricAt(musicState.time)
+            const active = lyricWordsAt(musicState.time)
+            const line = active?.cue.text || ''
             if (line !== shown) {
                 shown = line
                 const node = el.current
@@ -304,9 +365,18 @@ function Captions() {
                     node.classList.remove('is-visible')
                     // Swap text on the next frame so the fade-out reads before fade-in.
                     requestAnimationFrame(() => {
-                        node.textContent = line
+                        node.replaceChildren(...(active?.cue.words || []).map((word) => {
+                            const span = document.createElement('span')
+                            span.textContent = word.text
+                            return span
+                        }))
                         if (line) node.classList.add('is-visible')
                     })
+                }
+            }
+            if (el.current) {
+                for (const [index, word] of [...el.current.children].entries()) {
+                    word.classList.toggle('is-sung', index <= (active?.wordIndex ?? -1))
                 }
             }
             raf = requestAnimationFrame(loop)

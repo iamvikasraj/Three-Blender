@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Map Debug — Rockport</title>
+    <style>
+        html, body, #root { margin: 0; width: 100%; height: 100%; }
+        body { overflow: hidden; background: #1a1a22; }
+        #hint {
+            position: fixed; top: 10px; left: 10px; z-index: 10;
+            font: 12px/1.4 monospace; color: #cde; background: rgba(0,0,0,0.5);
+            padding: 8px 10px; border-radius: 4px; pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="hint">drag: orbit &middot; scroll: zoom &middot; right-drag: pan<br>green = detected road surface &middot; red sphere = spawn point</div>
+    <div id="root"></div>
+    <script type="module" src="./mapdebug.jsx"></script>
+</body>
+</html>
