@@ -95,7 +95,7 @@ export function SunsetScene() {
     // ── Scrolling props: centre dashes ───────────────────────────────────────
     const dashGeo = useMemo(() => { const g = new THREE.PlaneGeometry(0.5, 4); g.rotateX(-Math.PI / 2); return g }, [])
     const dashMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#eef6ea' }), [])
-    const skidGeo = useMemo(() => { const g = new THREE.PlaneGeometry(1, 2.6); g.rotateX(-Math.PI / 2); return g }, [])
+    const skidGeo = useMemo(() => { const g = new THREE.PlaneGeometry(0.3, 2.6); g.rotateX(-Math.PI / 2); return g }, [])
     const skidMat = useMemo(() => new THREE.MeshBasicMaterial({ color: '#0b0b12', transparent: true, opacity: 0.8 }), [])
     const dashN = Math.ceil((FWD - BACK) / DASH_PITCH)
     const dashZ = useMemo(() => Array.from({ length: dashN }, (_, i) => BACK + i * DASH_PITCH), [dashN])
